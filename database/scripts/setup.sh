@@ -41,6 +41,7 @@ done
 echo "[setup] grants (app role: no DDL, no DELETE)"
 sql --database="$APP_DB_NAME" -e "GRANT CONNECT ON DATABASE ${APP_DB_NAME} TO ${APP_DB_USER};"
 sql --database="$APP_DB_NAME" -e "GRANT SELECT, INSERT, UPDATE ON TABLE users TO ${APP_DB_USER};"
+sql --database="$APP_DB_NAME" -e "GRANT SELECT, INSERT, UPDATE ON TABLE refresh_tokens TO ${APP_DB_USER};"
 sql --database="$APP_DB_NAME" -e "REVOKE CREATE ON SCHEMA public FROM public;" \
   || echo "[setup] WARNING: could not revoke CREATE on schema public (non-fatal)"
 

@@ -72,13 +72,17 @@ docker compose exec cockroach /cockroach/cockroach sql --certs-dir=/certs --host
 
 One table, `users`, with a random UUID primary key and **globally unique** `username_normalized` and `email_normalized`.
 
+A second table, `refresh_tokens` (`sql/002_refresh_tokens.sql`), stores the SHA-256 hash of each refresh token for the backend (single-use, with expiry and a revoked flag).
+
+If you already have a running database from an earlier version, apply the new table with `docker compose up -d --build` followed by `docker compose run --rm db-setup` (your data is kept).
+
 Your auth service must:
 
 - Normalize usernames and emails (Unicode NFKC, then lowercase) before every insert and lookup. The database cannot do this for you.
 - Store the password as a full argon2id PHC string in `password_hash`.
 - Retry transactions that fail with SQLSTATE `40001`.
 
-The app role (`chat_app` by default) can `SELECT`, `INSERT` and `UPDATE` on `users`, and nothing else: no DDL and no `DELETE`. Add `DELETE` in `scripts/setup.sh` when you build account deletion. Grants for any new table must be added there too.
+The app role (`chat_app` by default) can `SELECT`, `INSERT` and `UPDATE` on `users` and `refresh_tokens`, and nothing else: no DDL and no `DELETE`. Add `DELETE` in `scripts/setup.sh` when you build account deletion. Grants for any new table must be added there too.
 
 ## License
 
