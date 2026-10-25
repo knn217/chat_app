@@ -2,20 +2,20 @@
 
 SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+HELP=false
 CLEAN=false
 BUILD_PROFILE=""
 LOG_LEVEL=""
-UPDATE_PACKAGE=false
 RUN_PROFILE=""
 PROFILING=false
 PROFILING_TYPE=""
-TEST=false
 JOBS=1
 
 # URL_NOTO_REGULAR="https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"
 
 main(){
     parse "$@"
+    help
     choices
     setup_env_linux
     setup_env_windows
@@ -27,23 +27,21 @@ main(){
 
 parse(){
     local SHORT_OPTS="
+    h
     c
     b:
     v
-    u
     r:
     p:
-    t
     j:
     "
     local LONG_OPTS="
+    help,
     clean,
     build:,
     verbose,
-    update,
     run:,
     profile:,
-    test,
     jobs:
     "
     local TEMP=$(getopt \
@@ -59,18 +57,34 @@ parse(){
 
     while true; do
         case "$1" in 
+            -h | --help )    HELP=true; shift ;;
             -c | --clean )   CLEAN=true; shift ;;
             -b | --build )   BUILD_PROFILE="$2"; shift 2 ;;
             -v | --verbose ) LOG_LEVEL=-vv; shift ;;
-            -u | --update )  UPDATE_PACKAGE=true; shift ;;
             -r | --run )     RUN_PROFILE="$2"; shift 2 ;;
             -p | --profile ) PROFILING=true; PROFILING_TYPE="$2"; shift 2 ;;
-            -t | --test )    TEST=true; shift ;;
             -j | --jobs )    JOBS="$2"; shift 2 ;;
             -- ) shift; break ;;
             * ) break ;;
         esac
     done
+}
+
+help(){
+    if [ "$HELP" == "false" ]; then
+        return
+    fi
+    echo "================="
+    echo "Arguments:"
+    echo "<-h | --help>:                 Print help message"
+    echo "<-c | --clean>:                Toggle to clean cargo build cache"
+    echo "<-b | --build>:                Build one of the targets in cargo.toml         [dev | release | ...]"
+    echo "<-v | --verbose>:              Toggle to enable verbosed logs"
+    echo "<-r | --run>:                  Run one of the targets in cargo.toml           [dev | release | ...]"
+    echo "<-p | --profile>:              Run perf profiling, use one of the categories  ["" | mem | c2c | sched | ...]"
+    echo "<-j | --jobs>:                 The number of build jobs                       [1 | 2 | 3 | ...]"
+    echo "================="
+    exit 0
 }
 
 choices(){
@@ -79,9 +93,7 @@ choices(){
     echo "CLEAN:            $CLEAN"
     echo "BUILD_PROFILE:    $BUILD_PROFILE"
     echo "LOG_LEVEL:        $LOG_LEVEL"
-    echo "UPDATE_PACKAGE:   $UPDATE_PACKAGE"
     echo "RUN_PROFILE:      $RUN_PROFILE"
-    echo "TEST:             $TEST"
     echo "PROFILING:        $PROFILING"
     echo "PROFILING_TYPE:   $PROFILING_TYPE"
     echo "JOBS:             $JOBS"
