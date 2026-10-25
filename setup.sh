@@ -11,8 +11,6 @@ PROFILING=false
 PROFILING_TYPE=""
 JOBS=1
 
-# URL_NOTO_REGULAR="https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf"
-
 main(){
     parse "$@"
     help
@@ -137,7 +135,6 @@ setup_env_windows(){
         #clang
         # "LLVM.LLVM --version 21.1.8"
         # Ninja-build.Ninja
-        # JFrog.Conan
     )
     for pkg in "${packages[@]}"; do
         pkg_name="${pkg%% *}"
@@ -261,13 +258,6 @@ run(){
             > "$PROFILING_PATH/report.txt"
         echo "================="
         echo "Report written at: $PROFILING_PATH/report.txt"
-        # Annotate is way too slow
-        # perf annotate \
-        #     --stdio \
-        #     -i "$PROFILING_PATH/perf.data" \
-        #     > "$PROFILING_PATH/annotated.txt"
-        # echo "================="
-        # echo "annotate written at: $PROFILING_PATH/annotated.txt"
     fi
 
 }
