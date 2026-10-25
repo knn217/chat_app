@@ -1,0 +1,5 @@
+TODO
+- Phase 1: Add a distributed database 1st (scyllaDB), packaged with docker
+- Phase 2: Create a simple BE server, only for authen and register users into DB, also docker
+- Phase 3: Create a FE app (figure out tech stack later), still use docker tho
+- Phase 4: Add more features on DB + BE + FE at the same time
