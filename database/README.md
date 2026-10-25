@@ -14,6 +14,7 @@ A single-node, secure CockroachDB in Docker that stores users for the chat app's
 | `scripts/setup.sh` | Creates the database, app role, schema, grants (idempotent) |
 | `sql/001_users.sql` | The `users` table |
 | `scripts/backup.sh`, `scripts/restore.sh` | Host-side backup and restore |
+| `install.sh` | Installer used inside a release package |
 
 ## Requirements
 
@@ -22,7 +23,19 @@ A single-node, secure CockroachDB in Docker that stores users for the chat app's
 
 On Windows, keep the repo's LF line endings (`.gitattributes` handles this), otherwise the shell scripts fail inside the container.
 
-## Install
+## Install from a release package
+
+The root `setup.sh -b <profile>` builds the image and writes it to `package/database/` next to the backend and frontend. That folder is self-contained: copy it anywhere, no registry and no source checkout needed.
+
+```sh
+sh install.sh
+```
+
+It loads the image from `chat-db.tar.gz`, creates `.env` with a generated app password (an existing `.env` is left alone), starts the database and follows the setup log. The image is built for the CPU architecture of the machine that ran `setup.sh`.
+
+Everything below this section (connecting, backups, license) applies to both install methods.
+
+## Install from source
 
 ```sh
 cp .env.example .env

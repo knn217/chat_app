@@ -197,6 +197,37 @@ build(){
 
     # Copy resources into the frontend package folder
     resources
+    # Package the database image and its installer
+    database
+}
+
+database(){
+    local DB_SRC="$SCRIPTDIR/database"
+    local PKG_PATH="$SCRIPTDIR/target/$BUILD_PROFILE/package/database"
+    local IMAGE="chat-db:local"
+    # Base image tag lives in .env.example, single source of truth
+    local DB_VERSION=$(grep -E '^COCKROACH_VERSION=' "$DB_SRC/.env.example" | cut -d= -f2-)
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "docker is required to package the database" >&2
+        exit 1
+    fi
+
+    # Build the image (setup scripts and SQL are baked into it)
+    docker build -t "$IMAGE" --build-arg COCKROACH_VERSION="$DB_VERSION" "$DB_SRC" || exit 1
+
+    # Recreate package path
+    rm -rf "$PKG_PATH"
+    mkdir -p "$PKG_PATH/scripts"
+
+    # Export the image so it can be installed offline with `docker load`
+    docker save "$IMAGE" -o "$PKG_PATH/chat-db.tar" || exit 1
+    gzip -f "$PKG_PATH/chat-db.tar" || exit 1
+
+    # Only the host-side files are needed next to the image
+    cp "$DB_SRC/docker-compose.yml" "$DB_SRC/.env.example" "$DB_SRC/README.md" "$DB_SRC/install.sh" "$PKG_PATH/" || exit 1
+    cp "$DB_SRC/scripts/backup.sh" "$DB_SRC/scripts/restore.sh" "$PKG_PATH/scripts/" || exit 1
+    chmod +x "$PKG_PATH/install.sh" "$PKG_PATH"/scripts/*.sh
 }
 
 resources(){
