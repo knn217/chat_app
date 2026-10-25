@@ -15,6 +15,7 @@ A single-node, secure CockroachDB in Docker that stores users for the chat app's
 | `sql/001_users.sql` | The `users` table |
 | `scripts/backup.sh`, `scripts/restore.sh` | Host-side backup and restore |
 | `install.sh` | Installer used inside a release package |
+| `uninstall.sh` | Removes the containers, data, certs and image |
 
 ## Requirements
 
@@ -106,7 +107,19 @@ Backups are CockroachDB `BACKUP` files copied out of the container. **Test a res
 - `APP_DB_PASSWORD` is passed to the setup container as an environment variable, so it is visible via `docker inspect` on the host.
 - Never connect your app as `root`.
 
+## Uninstall
+
+```sh
+sh uninstall.sh               # asks you to type "delete", then removes containers, volumes and the image
+sh uninstall.sh --keep-data   # removes containers and the image, keeps the data and cert volumes
+sh uninstall.sh --yes         # no prompt
+```
+
+`.env`, `ca.crt` and `backups/` are left in place. Take a backup first if you need the data.
+
 ## Reset everything
+
+Same as `sh uninstall.sh`, or from a source checkout:
 
 ```sh
 docker compose down -v

@@ -225,9 +225,9 @@ database(){
     gzip -f "$PKG_PATH/chat-db.tar" || exit 1
 
     # Only the host-side files are needed next to the image
-    cp "$DB_SRC/docker-compose.yml" "$DB_SRC/.env.example" "$DB_SRC/README.md" "$DB_SRC/install.sh" "$PKG_PATH/" || exit 1
+    cp "$DB_SRC/docker-compose.yml" "$DB_SRC/.env.example" "$DB_SRC/README.md" "$DB_SRC/install.sh" "$DB_SRC/uninstall.sh" "$PKG_PATH/" || exit 1
     cp "$DB_SRC/scripts/backup.sh" "$DB_SRC/scripts/restore.sh" "$PKG_PATH/scripts/" || exit 1
-    chmod +x "$PKG_PATH/install.sh" "$PKG_PATH"/scripts/*.sh
+    chmod +x "$PKG_PATH/install.sh" "$PKG_PATH/uninstall.sh" "$PKG_PATH"/scripts/*.sh
 }
 
 resources(){
