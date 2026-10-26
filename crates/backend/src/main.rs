@@ -1,17 +1,19 @@
 mod db;
-use db::{Database, DbError};
+use db::{Database, DbError, NewUser};
 
 fn main() -> Result<(), DbError> {
     let mut db = Database::connect_from_env()?;
+    db.create_users_table()?;
 
-    db.create_accounts_table()?;
-    let a = db.insert_account(1000)?;
-    let b = db.insert_account(250)?;
+    let _user = db.insert_user(&NewUser {
+        username: "Alice".into(),
+        email: "Alice@Example.com".into(),
+        password_hash: "this is an example hash".into(),
+    })?;
 
-    db.transfer_funds(a, b, 100)?;
-
-    for acc in db.list_accounts()? {
-        println!("{} {}", acc.id, acc.balance);
+    match db.get_user_by_username("alice")? {
+        Some(_u) => { /* verify password against u.password_hash */ }
+        None => { /* unknown user */ }
     }
     Ok(())
 }

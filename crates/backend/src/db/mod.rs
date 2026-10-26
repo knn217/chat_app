@@ -4,12 +4,13 @@
 //! `openssl` or SQL types leak through the public API, so the driver can be swapped
 //! (e.g. to `tokio-postgres`) without touching any caller.
 
-mod accounts;
 mod error;
 mod tls;
 mod txn;
+mod users;
 
 pub use error::DbError;
+pub use users::NewUser;
 
 use postgres::Client;
 use std::env;

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // kept for upcoming multi-statement queries; unused for now
+
 use super::error::DbError;
 use postgres::{Client, Transaction, error::SqlState};
 

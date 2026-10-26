@@ -9,8 +9,12 @@ pub enum DbError {
     Connection(String),
     /// A query or transaction failed.
     Query(String),
-    /// A transfer was rejected because the source balance is too low.
-    InsufficientFunds { available: i64, requested: i64 },
+    /// Input failed validation before reaching the database (e.g. empty username).
+    InvalidInput(String),
+    /// Username already registered (compared in normalized form).
+    UsernameTaken,
+    /// Email already registered (compared in normalized form).
+    EmailTaken,
 }
 
 impl DbError {
@@ -25,13 +29,9 @@ impl fmt::Display for DbError {
             DbError::Config(m) => write!(f, "database config error: {m}"),
             DbError::Connection(m) => write!(f, "database connection error: {m}"),
             DbError::Query(m) => write!(f, "database query error: {m}"),
-            DbError::InsufficientFunds {
-                available,
-                requested,
-            } => write!(
-                f,
-                "insufficient funds: available {available}, requested {requested}"
-            ),
+            DbError::InvalidInput(m) => write!(f, "invalid input: {m}"),
+            DbError::UsernameTaken => write!(f, "username is already taken"),
+            DbError::EmailTaken => write!(f, "email is already registered"),
         }
     }
 }
