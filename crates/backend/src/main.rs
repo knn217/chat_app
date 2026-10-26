@@ -1,19 +1,28 @@
-mod db;
-use db::{Database, DbError, NewUser};
+use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web};
 
-fn main() -> Result<(), DbError> {
-    let mut db = Database::connect_from_env()?;
-    db.create_users_table()?;
+#[get("/")]
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
+}
 
-    let _user = db.insert_user(&NewUser {
-        username: "Alice".into(),
-        email: "Alice@Example.com".into(),
-        password_hash: "this is an example hash".into(),
-    })?;
+#[post("/echo")]
+async fn echo(req_body: String) -> impl Responder {
+    HttpResponse::Ok().body(req_body)
+}
 
-    match db.get_user_by_username("alice")? {
-        Some(_u) => { /* verify password against u.password_hash */ }
-        None => { /* unknown user */ }
-    }
-    Ok(())
+async fn manual_hello() -> impl Responder {
+    HttpResponse::Ok().body("Hey there!")
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| {
+        App::new()
+            .service(hello)
+            .service(echo)
+            .route("/hey", web::get().to(manual_hello))
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
 }
