@@ -4,4 +4,25 @@ edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+actix-web = "4.18.1"
+uuid = { version = "1.29.0", features = ["v4"] }
+serde = { version = "1.0.229", features = ["derive"] }
+env_logger = "0.11.11"
+log = "0.4.34"
+strum_macros = "0.28.0"
+strum = { version = "0.28.0", features = ["derive"] }
+derive_more = "2.1.1"
+
+openssl = "0.10.41"
+postgres-openssl = "0.5.0"
+chrono = "0.4.22"
+
+[dependencies.postgres]
+version = "0.19.3"
+features = [
+    "with-uuid-1"
+]
