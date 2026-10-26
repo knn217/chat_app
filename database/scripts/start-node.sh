@@ -17,7 +17,7 @@ if [ ! -f "$CERTS/ca.crt" ]; then
 fi
 
 exec "$CRDB" start-single-node \
-  --certs-dir="$CERTS" \
+  --insecure \
   --store=/cockroach/cockroach-data \
   --listen-addr=0.0.0.0:26257 \
   --http-addr=0.0.0.0:8080 \

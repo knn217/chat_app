@@ -261,12 +261,13 @@ run(){
 
     local TARGET_PATH="$SCRIPTDIR/target/$RUN_PROFILE"
     local PACKAGE_PATH="$TARGET_PATH/package/backend"
-    local PROFILING_PATH="$TARGET_PATH/profiling"
-    rm -rf "$PROFILING_PATH"
-    mkdir -p "$PROFILING_PATH"
+    export DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable"
     if [ "$PROFILING" == "false" ]; then
         RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || exit 1
     else
+        local PROFILING_PATH="$TARGET_PATH/profiling"
+        rm -rf "$PROFILING_PATH"
+        mkdir -p "$PROFILING_PATH"
         # Save the current paranoid setting
         local OLD_PARANOID=$(cat /proc/sys/kernel/perf_event_paranoid)
         # Ensure the setting is restored when the script exits (whether it succeeds or fails)

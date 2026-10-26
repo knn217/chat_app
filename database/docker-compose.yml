@@ -18,9 +18,9 @@ services:
       # - "127.0.0.1:8080:8080"
     volumes:
       - crdb-data:/cockroach/cockroach-data
-      - crdb-certs:/certs
+      # - crdb-certs:/certs
     healthcheck:
-      test: ["CMD", "/cockroach/cockroach", "sql", "--certs-dir=/certs", "--host=localhost:26257", "-e", "SELECT 1"]
+      test: ["CMD", "/cockroach/cockroach", "sql", "--insecure", "--host=localhost:26257", "-e", "SELECT 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -42,10 +42,10 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       COCKROACH_ORG: ${COCKROACH_ORG:-}
       COCKROACH_LICENSE: ${COCKROACH_LICENSE:-}
-    volumes:
-      - crdb-certs:/certs:ro
+    # volumes:
+    #   - crdb-certs:/certs:ro
     restart: "no"
 
 volumes:
   crdb-data:
-  crdb-certs:
+  # crdb-certs:
