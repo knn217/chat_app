@@ -4,10 +4,16 @@
 //! display form and can't mismatch the `*_normalized` columns. Password hashing is the
 //! caller's job: this module stores and returns the hash it is given.
 
-use super::{Database, error::DbError};
-use postgres::{Row, error::SqlState, types::ToSql};
+// std
 use std::{fmt, time::SystemTime};
+
+// dep
+use postgres::{Row, error::SqlState, types::ToSql};
+use serde::Deserialize;
 use uuid::Uuid;
+
+// local
+use super::{Database, error::DbError};
 
 const COLS: &str = "user_id, username, email, password_hash, created_at, updated_at";
 
@@ -23,7 +29,7 @@ pub struct User {
 }
 
 /// Input for [`Database::insert_user`]. `password_hash` must already be hashed.
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
 pub struct NewUser {
     pub username: String,
     pub email: String,
