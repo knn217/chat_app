@@ -261,9 +261,17 @@ run(){
 
     local TARGET_PATH="$SCRIPTDIR/target/$RUN_PROFILE"
     local PACKAGE_PATH="$TARGET_PATH/package/backend"
+    # Setup database
+    # docker compose cp cockroach:/certs/ca.crt ./ca.crt
+    # docker compose up -d --build
+    $TARGET_PATH/package/database/install.sh
     export DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+
     if [ "$PROFILING" == "false" ]; then
-        RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || exit 1
+        RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || {
+            $TARGET_PATH/package/database/uninstall.sh
+            exit 1
+            }
     else
         local PROFILING_PATH="$TARGET_PATH/profiling"
         rm -rf "$PROFILING_PATH"
@@ -291,6 +299,8 @@ run(){
         echo "================="
         echo "Report written at: $PROFILING_PATH/report.txt"
     fi
+
+    $TARGET_PATH/package/database/uninstall.sh
 
 }
 
