@@ -1,9 +1,9 @@
 // Dep
-use actix_web::{Error, HttpResponse, error::ErrorInternalServerError, get, post, web};
+use actix_web::{Error, HttpResponse, error, get, post, web};
 use actix_web_validator::Json;
 
 // Local
-use crate::db::{Database, NewUser};
+use crate::db::{Database, DbError, NewUser};
 
 #[get("/me")]
 async fn me() -> Result<HttpResponse, Error> {
@@ -12,10 +12,12 @@ async fn me() -> Result<HttpResponse, Error> {
 #[post("/register")]
 async fn register(db: web::Data<Database>, req_body: Json<NewUser>) -> Result<HttpResponse, Error> {
     // Insert to db
-    let _user = db
-        .insert_user(&req_body)
-        .await
-        .map_err(|e| ErrorInternalServerError(format!("Database insertion failed: {:?}", e)))?;
+    let _user = db.insert_user(&req_body).await.map_err(|e| match e {
+        DbError::UsernameTaken => {
+            error::ErrorConflict(format!("Database insertion failed: {:?}", e))
+        }
+        _ => error::ErrorInternalServerError(format!("Database insertion failed: {:?}", e)),
+    })?;
     // Response
     Ok(HttpResponse::Created().finish())
 }
