@@ -2,14 +2,16 @@
 //!
 //! Normalization (`trim` + lowercase) and password hashing both happen inside this module.
 //! Callers only ever pass the plaintext `password` and never see a hash.
+//! All methods are `async` and take `&self`.
 
 // std
 use std::{fmt, time::SystemTime};
 
 // dep
-use postgres::{Row, error::SqlState, types::ToSql};
 use serde::Deserialize;
+use tokio_postgres::{Row, error::SqlState, types::ToSql};
 use uuid::Uuid;
+use validator::{Validate, ValidationError};
 
 // local
 use super::{
@@ -30,11 +32,35 @@ pub struct User {
     pub updated_at: SystemTime,
 }
 
+fn validate_password(password: &str) -> Result<(), ValidationError> {
+    if password.len() < 8 {
+        let mut err = ValidationError::new("length");
+        err.message = Some("Password must be at least 8 characters long".into());
+        return Err(err);
+    }
+
+    let has_lowercase = password.chars().any(|c| c.is_lowercase());
+    let has_uppercase = password.chars().any(|c| c.is_uppercase());
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    let has_special = password.chars().any(|c| "@$!%*?&".contains(c));
+
+    if !has_lowercase || !has_uppercase || !has_digit || !has_special {
+        let mut err = ValidationError::new("complexity");
+        err.message = Some("Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character".into());
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 /// Input for [`Database::insert_user`]. `password` is plaintext and is hashed internally.
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct NewUser {
+    #[validate(length(min = 3, max = 50))]
     pub username: String,
+    #[validate(email)]
     pub email: String,
+    #[validate(custom(function = "validate_password"))]
     pub password: String,
 }
 
@@ -64,7 +90,7 @@ fn from_row(row: &Row) -> Result<User, DbError> {
 }
 
 /// Maps unique-constraint violations on insert to `UsernameTaken` / `EmailTaken`.
-fn map_insert_err(e: postgres::Error) -> DbError {
+fn map_insert_err(e: tokio_postgres::Error) -> DbError {
     if e.code() == Some(&SqlState::UNIQUE_VIOLATION) {
         let db_err = e.as_db_error();
         let constraint = db_err.and_then(|d| d.constraint()).unwrap_or("");
@@ -82,18 +108,21 @@ fn map_insert_err(e: postgres::Error) -> DbError {
 
 /// Verifies `password` against a found user. Unknown user and wrong password both give
 /// `None`, and an unknown user still pays the hashing cost.
-fn check_password(found: Option<(User, String)>, password: &str) -> Result<Option<User>, DbError> {
+async fn check_password(
+    found: Option<(User, String)>,
+    password: &str,
+) -> Result<Option<User>, DbError> {
     match found {
-        Some((user, hash)) => Ok(verify_password(password, &hash)?.then_some(user)),
+        Some((user, hash)) => Ok(verify_password(password, hash).await?.then_some(user)),
         None => {
-            burn_verify(password);
+            burn_verify(password).await;
             Ok(None)
         }
     }
 }
 
 impl Database {
-    pub fn create_users_table(&mut self) -> Result<(), DbError> {
+    pub async fn create_users_table(&self) -> Result<(), DbError> {
         self.client
             .batch_execute(
                 "CREATE TABLE IF NOT EXISTS users (
@@ -114,12 +143,13 @@ impl Database {
                     CONSTRAINT users_password_hash_nonempty CHECK (password_hash <> '')
                 )",
             )
+            .await
             .map_err(DbError::from_pg)
     }
 
     /// Hashes the password, inserts the user and returns the stored row.
     /// Fails with `UsernameTaken` / `EmailTaken` on duplicates (compared normalized).
-    pub fn insert_user(&mut self, new: &NewUser) -> Result<User, DbError> {
+    pub async fn insert_user(&self, new: &NewUser) -> Result<User, DbError> {
         let username_normalized = normalize(&new.username);
         let email_normalized = normalize(&new.email);
         if username_normalized.is_empty() {
@@ -131,7 +161,7 @@ impl Database {
         if new.password.is_empty() {
             return Err(DbError::InvalidInput("password is empty".into()));
         }
-        let password_hash = hash_password(&new.password)?;
+        let password_hash = hash_password(&new.password).await?;
 
         let sql = format!(
             "INSERT INTO users (username, username_normalized, email, email_normalized, password_hash)
@@ -150,52 +180,57 @@ impl Database {
                     &password_hash,
                 ],
             )
+            .await
             .map_err(map_insert_err)?;
         from_row(&row)
     }
 
     /// Returns the user if the username and password match, otherwise `None`
     /// (unknown user and wrong password are deliberately indistinguishable).
-    pub fn authenticate_by_username(
-        &mut self,
+    pub async fn authenticate_by_username(
+        &self,
         username: &str,
         password: &str,
     ) -> Result<Option<User>, DbError> {
-        let found = self.find("username_normalized", &normalize(username))?;
-        check_password(found, password)
+        let found = self
+            .find("username_normalized", &normalize(username))
+            .await?;
+        check_password(found, password).await
     }
 
     /// Same as [`Database::authenticate_by_username`], but identifies the user by email.
-    pub fn authenticate_by_email(
-        &mut self,
+    pub async fn authenticate_by_email(
+        &self,
         email: &str,
         password: &str,
     ) -> Result<Option<User>, DbError> {
-        let found = self.find("email_normalized", &normalize(email))?;
-        check_password(found, password)
+        let found = self.find("email_normalized", &normalize(email)).await?;
+        check_password(found, password).await
     }
 
-    pub fn get_user_by_id(&mut self, user_id: Uuid) -> Result<Option<User>, DbError> {
-        Ok(self.find("user_id", &user_id)?.map(|(user, _)| user))
+    pub async fn get_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, DbError> {
+        Ok(self.find("user_id", &user_id).await?.map(|(user, _)| user))
     }
 
     /// Case-insensitive lookup (input is normalized).
-    pub fn get_user_by_username(&mut self, username: &str) -> Result<Option<User>, DbError> {
+    pub async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError> {
         Ok(self
-            .find("username_normalized", &normalize(username))?
+            .find("username_normalized", &normalize(username))
+            .await?
             .map(|(user, _)| user))
     }
 
     /// Case-insensitive lookup (input is normalized).
-    pub fn get_user_by_email(&mut self, email: &str) -> Result<Option<User>, DbError> {
+    pub async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
         Ok(self
-            .find("email_normalized", &normalize(email))?
+            .find("email_normalized", &normalize(email))
+            .await?
             .map(|(user, _)| user))
     }
 
     /// Internal lookup returning the user together with its stored hash.
-    fn find(
-        &mut self,
+    async fn find(
+        &self,
         column: &'static str,
         value: &(dyn ToSql + Sync),
     ) -> Result<Option<(User, String)>, DbError> {
@@ -203,6 +238,7 @@ impl Database {
         let row = self
             .client
             .query_opt(&sql, &[value])
+            .await
             .map_err(DbError::from_pg)?;
         match row {
             Some(row) => {

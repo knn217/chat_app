@@ -1,7 +1,7 @@
 # db module
 
-Barebone query layer for CockroachDB (Postgres wire protocol). It is the only code
-that knows about `postgres`, `openssl`, `argon2` or SQL. Callers use `Database`, plain
+Barebone **async** query layer for CockroachDB (Postgres wire protocol). It is the only code
+that knows about `tokio_postgres`, `openssl`, `argon2` or SQL. Callers use `Database`, plain
 data types and `DbError`, so the driver can be swapped without touching any caller.
 
 ## Layout
@@ -10,8 +10,7 @@ data types and `DbError`, so the driver can be swapped without touching any call
 |------|---------|
 | `mod.rs` | `Database` (owns the client), `connect_from_env()`, `connect(url)`; re-exports |
 | `users.rs` | `users` auth table: `User`, `NewUser`, insert, authenticate, lookups |
-| `password.rs` | Private Argon2id hashing and verification |
-| `txn.rs` | Private `execute_txn`: transaction with automatic retry on serialization failures (unused until a query needs several statements) |
+| `password.rs` | Private Argon2id hashing and verification (runs on the blocking pool) |
 | `error.rs` | `DbError`, the only error type callers see |
 | `tls.rs` | Private openssl TLS connector |
 
@@ -20,11 +19,12 @@ data types and `DbError`, so the driver can be swapped without touching any call
 Add to `Cargo.toml`:
 
 ```toml
-postgres = { version = "0.19", features = ["with-uuid-1"] }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 postgres-openssl = "0.5"
 openssl = "0.10"
 uuid = "1"
 argon2 = { version = "0.5", features = ["std"] }
+tokio = { version = "1", features = ["rt"] }
 ```
 
 Copy the folder into your crate as `src/db/` and declare it:
@@ -39,37 +39,122 @@ mod db;
 postgresql://user:password@host:26257/dbname?sslmode=require
 ```
 
-## Usage
+Or connect with an explicit URL: `Database::connect("postgresql://...").await?`.
+
+## Async rules
+
+Every method that touches the database is `async`: always `.await` it, from inside a tokio
+runtime (actix-web's runtime is one). All methods take `&self`, so a single `Database`
+can be shared by request handlers and background tasks without a `Mutex`.
+
+- Create the `Database` **once at startup**, inside `main` (under `#[actix_web::main]`), and
+  share it. Don't create it per request or inside the `HttpServer::new` closure.
+- Never call it from plain sync code and never wrap it in `block_on` / `Runtime::new()`.
+  Starting a runtime inside a runtime panics with "Cannot start a runtime from within a
+  runtime".
+- Don't pass a `&mut`-style handle around. Share via `web::Data<Database>` or `Arc<Database>`.
+
+## Usage: REST handler (actix-web)
 
 ```rust
+use actix_web::{web, App, HttpResponse, HttpServer};
+
 mod db;
 use db::{Database, DbError, NewUser};
 
-fn main() -> Result<(), DbError> {
-    let mut db = Database::connect_from_env()?;
-    db.create_users_table()?;
+#[derive(serde::Deserialize)]
+struct SignUp {
+    username: String,
+    email: String,
+    password: String,
+}
 
-    // Register: pass the plaintext password, the module hashes it.
-    let user = db.insert_user(&NewUser {
-        username: "Alice".into(),
-        email: "Alice@Example.com".into(),
-        password: "correct horse battery staple".into(),
-    })?;
-
-    // Log in: Some(user) on success, None for unknown user or wrong password.
-    match db.authenticate_by_username("alice", "correct horse battery staple")? {
-        Some(u) => println!("welcome {}", u.username),
-        None => println!("invalid credentials"),
+// POST /signup
+async fn sign_up(db: web::Data<Database>, body: web::Json<SignUp>) -> HttpResponse {
+    let body = body.into_inner();
+    let new = NewUser {
+        username: body.username,
+        email: body.email,
+        password: body.password, // plaintext, the module hashes it
+    };
+    match db.insert_user(&new).await {
+        Ok(user) => HttpResponse::Created().body(user.user_id.to_string()),
+        Err(DbError::UsernameTaken | DbError::EmailTaken) => HttpResponse::Conflict().finish(),
+        Err(DbError::InvalidInput(msg)) => HttpResponse::BadRequest().body(msg),
+        Err(e) => {
+            eprintln!("signup failed: {e}");
+            HttpResponse::InternalServerError().finish()
+        }
     }
-    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct Login {
+    username: String,
+    password: String,
+}
+
+// POST /login
+async fn login(db: web::Data<Database>, body: web::Json<Login>) -> HttpResponse {
+    match db.authenticate_by_username(&body.username, &body.password).await {
+        Ok(Some(user)) => HttpResponse::Ok().body(user.user_id.to_string()),
+        Ok(None) => HttpResponse::Unauthorized().finish(), // unknown user or wrong password
+        Err(e) => {
+            eprintln!("login failed: {e}");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    // Connect once, here, inside the runtime.
+    let db = Database::connect_from_env()
+        .await
+        .expect("failed to connect to database");
+    db.create_users_table()
+        .await
+        .expect("failed to create users table");
+
+    let db = web::Data::new(db);
+    HttpServer::new(move || {
+        App::new()
+            .app_data(db.clone()) // cheap Arc clone per worker
+            .route("/signup", web::post().to(sign_up))
+            .route("/login", web::post().to(login))
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
 }
 ```
 
-Or connect with an explicit URL: `Database::connect("postgresql://...")?`.
+## Usage: server-internal code (no REST)
+
+The same `Database` works from background tasks and other internal code. Share it as an `Arc`
+(`web::Data<Database>` is one, use `.into_inner()`):
+
+```rust
+use std::sync::Arc;
+
+let db: Arc<Database> = db.into_inner();
+
+// e.g. a background task
+let task_db = Arc::clone(&db);
+tokio::spawn(async move {
+    match task_db.get_user_by_id(some_user_id).await {
+        Ok(Some(user)) => println!("found {}", user.username),
+        Ok(None) => println!("no such user"),
+        Err(e) => eprintln!("lookup failed: {e}"),
+    }
+});
+```
+
+Outside of actix, the same code works under `#[tokio::main]`.
 
 ## API
 
-All methods take `&mut self` and return `Result<_, DbError>`.
+All methods are `async` and take `&self`.
 
 | Method | Returns | Notes |
 |--------|---------|-------|
@@ -93,10 +178,11 @@ carries no password data. `NewUser`'s `Debug` output redacts `password`.
 
 - Hashing is Argon2id (the `argon2` crate defaults) with a random salt. The stored value is
   a PHC string, so salt and parameters travel with the hash.
+- Hashing and verification are CPU-heavy (tens of milliseconds), so the module runs them on
+  tokio's blocking pool. Async worker threads are not stalled.
 - `authenticate_*` returns `None` for both "no such user" and "wrong password". For an
   unknown user it still performs a dummy verification, so response time doesn't reveal which
   usernames or emails exist.
-- Hashing is deliberately slow (tens of milliseconds). Call it off the async runtime, see Notes.
 
 ## Errors
 
@@ -104,38 +190,26 @@ carries no password data. `NewUser`'s `Debug` output redacts `password`.
 
 - `Config(String)`: missing or invalid configuration (for example `DATABASE_URL` unset)
 - `Connection(String)`: network or TLS failure while connecting
-- `Query(String)`: a query or transaction failed
+- `Query(String)`: a query failed
 - `InvalidInput(String)`: rejected before reaching the database (empty username, email or password)
 - `Hash(String)`: hashing or verification failed (for example a malformed stored hash)
 - `UsernameTaken` / `EmailTaken`: unique violation on insert
-
-```rust
-match db.insert_user(&new_user) {
-    Ok(user) => { /* created */ }
-    Err(DbError::UsernameTaken) => { /* 409 */ }
-    Err(DbError::EmailTaken) => { /* 409 */ }
-    Err(e) => eprintln!("{e}"),
-}
-```
 
 ## Adding queries
 
 1. Create a file such as `sessions.rs` and add `mod sessions;` in `mod.rs`.
 2. Add a plain return type (no driver types) and re-export it with `pub use` in `mod.rs`.
-3. Add an `impl Database` block. Plain statements use `self.client.query/execute`, and
-   `.map_err(DbError::from_pg)` converts errors.
-4. For multi-statement atomic work, use `execute_txn(&mut self.client, |txn| { ... })`
-   from `txn.rs` (and remove its `#![allow(dead_code)]`). Use `?` on driver calls.
-   Return `Err(DbError::...into())` to abort without retry. The closure can run more than
-   once, so keep side effects out of it.
+3. Add an `impl Database` block with `async fn`s taking `&self`, using
+   `self.client.query/execute(...).await` and `.map_err(DbError::from_pg)` for errors.
+4. Multi-statement atomic work needs a transaction (`&mut` on the client) and CockroachDB
+   retry handling. The old retry helper was removed with the sync driver. Add an async one
+   when the first query needs it.
 
 ## Notes
 
-- **Blocking:** the `postgres` crate is synchronous, and password hashing is CPU-heavy.
-  Inside async code (Rocket handlers), call into this module via
-  `tokio::task::spawn_blocking`, or later move the module to `tokio-postgres` internally.
-  Callers won't change.
-- **One connection:** `Database` wraps a single client. For concurrent use, add a pool
-  (for example `r2d2_postgres`) inside `mod.rs`.
+- **One connection:** `Database` wraps a single connection driven by a background task. It
+  does not reconnect: if the connection drops, calls return `DbError::Query`. When you need
+  more throughput or resilience, add a pool (for example `deadpool-postgres`) inside
+  `mod.rs`. Callers won't change.
 - **TLS:** the connector trusts the system root store. A node with self-signed certs needs
   its CA added in `tls.rs`.

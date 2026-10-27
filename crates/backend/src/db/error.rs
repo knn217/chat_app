@@ -20,7 +20,7 @@ pub enum DbError {
 }
 
 impl DbError {
-    pub(super) fn from_pg(e: postgres::Error) -> Self {
+    pub(super) fn from_pg(e: tokio_postgres::Error) -> Self {
         DbError::Query(e.to_string())
     }
 }
