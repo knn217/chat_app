@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 DB=$(grep -E '^APP_DB_NAME=' .env 2>/dev/null | cut -d= -f2- || true)
-DB=${DB:-chat}
+DB=${DB:-chat_db}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
 docker compose exec -T cockroach /cockroach/cockroach sql \

@@ -9,7 +9,7 @@ SRC=${1:-}
 [ "${2:-}" = "--yes" ] || { echo "refusing to drop the database without --yes" >&2; exit 1; }
 
 DB=$(grep -E '^APP_DB_NAME=' .env 2>/dev/null | cut -d= -f2- || true)
-DB=${DB:-chat}
+DB=${DB:-chat_db}
 STAMP=$(basename "$SRC")
 
 docker compose exec -T cockroach mkdir -p /cockroach/cockroach-data/extern/backups

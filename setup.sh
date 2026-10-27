@@ -265,7 +265,7 @@ run(){
     # docker compose cp cockroach:/certs/ca.crt ./ca.crt
     # docker compose up -d --build
     $TARGET_PATH/package/database/install.sh
-    export DATABASE_URL="postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+    export DATABASE_URL="postgresql://root@localhost:26257/chat_db?sslmode=disable"
 
     if [ "$PROFILING" == "false" ]; then
         RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || {

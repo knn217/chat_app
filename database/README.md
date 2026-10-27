@@ -59,17 +59,17 @@ docker compose cp cockroach:/certs/ca.crt ./ca.crt
 Connection string for the auth service:
 
 ```
-postgresql://chat_app:<APP_DB_PASSWORD>@localhost:26257/chat?sslmode=verify-full&sslrootcert=./ca.crt
+postgresql://chat_app:<APP_DB_PASSWORD>@localhost:26257/chat_db?sslmode=verify-full&sslrootcert=./ca.crt
 ```
 
 Quick check with a SQL shell inside the container (as root, for admin use only):
 
 ```sh
 # Secure
-docker compose exec cockroach /cockroach/cockroach sql --certs-dir=/certs --host=localhost:26257 -d chat -e "SHOW TABLES"
+docker compose exec cockroach /cockroach/cockroach sql --certs-dir=/certs --host=localhost:26257 -d chat_db -e "SHOW TABLES"
 
 # Insecure
-docker compose exec cockroach /cockroach/cockroach sql --insecure --host=localhost:26257 -d chat -e "SHOW TABLES"
+docker compose exec cockroach /cockroach/cockroach sql --insecure --host=localhost:26257 -d chat_db -e "SHOW TABLES"
 ```
 
 ## Schema
