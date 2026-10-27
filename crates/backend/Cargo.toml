@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 actix-web = { version = "4.18.1" }
+actix-web-validator = { version = "7.0" }
 argon2 = { version = "0.5", features = ["std"] }
 uuid = { version = "1.29.0", features = ["v4"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -17,10 +18,14 @@ log = { version = "0.4.34" }
 strum_macros = { version = "0.28.0" }
 strum = { version = "0.28.0", features = ["derive"] }
 derive_more = { version = "2.1.1" }
+validator = { version = "0.20.0", features = ["derive"] }
+regex = "1.13.1"
 
 openssl = { version = "0.10.41" }
 postgres-openssl = { version = "0.5.0" }
 chrono = { version = "0.4.22" }
+tokio-postgres = { version = "0.7.18" }
+tokio = "1.54.1"
 
 [dependencies.postgres]
 version = "0.19.3"
