@@ -1,15 +1,16 @@
 # db module
 
 Barebone query layer for CockroachDB (Postgres wire protocol). It is the only code
-that knows about `postgres`, `openssl` or SQL. Callers use `Database`, plain data
-types and `DbError`, so the driver can be swapped without touching any caller.
+that knows about `postgres`, `openssl`, `argon2` or SQL. Callers use `Database`, plain
+data types and `DbError`, so the driver can be swapped without touching any caller.
 
 ## Layout
 
 | File | Purpose |
 |------|---------|
 | `mod.rs` | `Database` (owns the client), `connect_from_env()`, `connect(url)`; re-exports |
-| `users.rs` | `users` auth table: `User`, `NewUser`, insert and lookups |
+| `users.rs` | `users` auth table: `User`, `NewUser`, insert, authenticate, lookups |
+| `password.rs` | Private Argon2id hashing and verification |
 | `txn.rs` | Private `execute_txn`: transaction with automatic retry on serialization failures (unused until a query needs several statements) |
 | `error.rs` | `DbError`, the only error type callers see |
 | `tls.rs` | Private openssl TLS connector |
@@ -23,6 +24,7 @@ postgres = { version = "0.19", features = ["with-uuid-1"] }
 postgres-openssl = "0.5"
 openssl = "0.10"
 uuid = "1"
+argon2 = { version = "0.5", features = ["std"] }
 ```
 
 Copy the folder into your crate as `src/db/` and declare it:
@@ -47,15 +49,17 @@ fn main() -> Result<(), DbError> {
     let mut db = Database::connect_from_env()?;
     db.create_users_table()?;
 
+    // Register: pass the plaintext password, the module hashes it.
     let user = db.insert_user(&NewUser {
         username: "Alice".into(),
         email: "Alice@Example.com".into(),
-        password_hash: hash_from_your_argon2_code,
+        password: "correct horse battery staple".into(),
     })?;
 
-    match db.get_user_by_username("alice")? {
-        Some(u) => { /* verify password against u.password_hash */ }
-        None => { /* unknown user */ }
+    // Log in: Some(user) on success, None for unknown user or wrong password.
+    match db.authenticate_by_username("alice", "correct horse battery staple")? {
+        Some(u) => println!("welcome {}", u.username),
+        None => println!("invalid credentials"),
     }
     Ok(())
 }
@@ -72,18 +76,27 @@ All methods take `&mut self` and return `Result<_, DbError>`.
 | `Database::connect_from_env()` | `Database` | Reads `DATABASE_URL` |
 | `Database::connect(url)` | `Database` | Explicit URL |
 | `create_users_table()` | `()` | `CREATE TABLE IF NOT EXISTS` |
-| `insert_user(&NewUser)` | `User` | `UsernameTaken` / `EmailTaken` on duplicates; `InvalidInput` on empty fields |
-| `get_user_by_id(Uuid)` | `Option<User>` | |
-| `get_user_by_username(&str)` | `Option<User>` | Case-insensitive |
-| `get_user_by_email(&str)` | `Option<User>` | Case-insensitive |
+| `insert_user(&NewUser)` | `User` | Hashes the password; `UsernameTaken` / `EmailTaken` on duplicates; `InvalidInput` on empty fields |
+| `authenticate_by_username(username, password)` | `Option<User>` | `None` for unknown user or wrong password |
+| `authenticate_by_email(email, password)` | `Option<User>` | Same, identified by email |
+| `get_user_by_id(Uuid)` | `Option<User>` | No password check |
+| `get_user_by_username(&str)` | `Option<User>` | Case-insensitive, no password check |
+| `get_user_by_email(&str)` | `Option<User>` | Case-insensitive, no password check |
 
-Normalization (`trim` + lowercase) is done inside the module, so pass usernames and
-emails as typed. Password hashing is the caller's job; the module stores the hash it is
-given.
+Normalization (`trim` + lowercase) and hashing both happen inside the module. Callers pass
+usernames and emails as typed, and passwords in plaintext.
 
-`User` has `user_id`, `username`, `email`, `password_hash`, `created_at`, `updated_at`
-(`SystemTime`). Its `Debug` output redacts `password_hash`, but never serialize a `User`
-straight into an API response.
+`User` has `user_id`, `username`, `email`, `created_at`, `updated_at` (`SystemTime`). It
+carries no password data. `NewUser`'s `Debug` output redacts `password`.
+
+## Passwords
+
+- Hashing is Argon2id (the `argon2` crate defaults) with a random salt. The stored value is
+  a PHC string, so salt and parameters travel with the hash.
+- `authenticate_*` returns `None` for both "no such user" and "wrong password". For an
+  unknown user it still performs a dummy verification, so response time doesn't reveal which
+  usernames or emails exist.
+- Hashing is deliberately slow (tens of milliseconds). Call it off the async runtime, see Notes.
 
 ## Errors
 
@@ -92,7 +105,8 @@ straight into an API response.
 - `Config(String)`: missing or invalid configuration (for example `DATABASE_URL` unset)
 - `Connection(String)`: network or TLS failure while connecting
 - `Query(String)`: a query or transaction failed
-- `InvalidInput(String)`: rejected before reaching the database (empty username, email or hash)
+- `InvalidInput(String)`: rejected before reaching the database (empty username, email or password)
+- `Hash(String)`: hashing or verification failed (for example a malformed stored hash)
 - `UsernameTaken` / `EmailTaken`: unique violation on insert
 
 ```rust
@@ -117,9 +131,10 @@ match db.insert_user(&new_user) {
 
 ## Notes
 
-- **Blocking:** the `postgres` crate is synchronous. Inside async code (Rocket handlers),
-  call into this module via `tokio::task::spawn_blocking`, or later move the module to
-  `tokio-postgres` internally. Callers won't change.
+- **Blocking:** the `postgres` crate is synchronous, and password hashing is CPU-heavy.
+  Inside async code (Rocket handlers), call into this module via
+  `tokio::task::spawn_blocking`, or later move the module to `tokio-postgres` internally.
+  Callers won't change.
 - **One connection:** `Database` wraps a single client. For concurrent use, add a pool
   (for example `r2d2_postgres`) inside `mod.rs`.
 - **TLS:** the connector trusts the system root store. A node with self-signed certs needs

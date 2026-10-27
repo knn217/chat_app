@@ -11,6 +11,8 @@ pub enum DbError {
     Query(String),
     /// Input failed validation before reaching the database (e.g. empty username).
     InvalidInput(String),
+    /// Password hashing or verification failed (e.g. malformed stored hash).
+    Hash(String),
     /// Username already registered (compared in normalized form).
     UsernameTaken,
     /// Email already registered (compared in normalized form).
@@ -30,6 +32,7 @@ impl fmt::Display for DbError {
             DbError::Connection(m) => write!(f, "database connection error: {m}"),
             DbError::Query(m) => write!(f, "database query error: {m}"),
             DbError::InvalidInput(m) => write!(f, "invalid input: {m}"),
+            DbError::Hash(m) => write!(f, "password hashing error: {m}"),
             DbError::UsernameTaken => write!(f, "username is already taken"),
             DbError::EmailTaken => write!(f, "email is already registered"),
         }

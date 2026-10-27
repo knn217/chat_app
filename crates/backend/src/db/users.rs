@@ -1,8 +1,7 @@
 //! Queries for the `users` auth table.
 //!
-//! Normalization (`trim` + lowercase) happens here, so callers only ever deal with the
-//! display form and can't mismatch the `*_normalized` columns. Password hashing is the
-//! caller's job: this module stores and returns the hash it is given.
+//! Normalization (`trim` + lowercase) and password hashing both happen inside this module.
+//! Callers only ever pass the plaintext `password` and never see a hash.
 
 // std
 use std::{fmt, time::SystemTime};
@@ -13,49 +12,39 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 // local
-use super::{Database, error::DbError};
+use super::{
+    Database,
+    error::DbError,
+    password::{burn_verify, hash_password, verify_password},
+};
 
-const COLS: &str = "user_id, username, email, password_hash, created_at, updated_at";
+const COLS: &str = "user_id, username, email, created_at, updated_at";
 
-/// A row of the `users` table (display forms only).
-#[derive(Clone)]
+/// A row of the `users` table (display forms only; no password data).
+#[derive(Debug, Clone)]
 pub struct User {
     pub user_id: Uuid,
     pub username: String,
     pub email: String,
-    pub password_hash: String,
     pub created_at: SystemTime,
     pub updated_at: SystemTime,
 }
 
-/// Input for [`Database::insert_user`]. `password_hash` must already be hashed.
-#[derive(Clone, Deserialize)]
+/// Input for [`Database::insert_user`]. `password` is plaintext and is hashed internally.
+#[derive(Deserialize)]
 pub struct NewUser {
     pub username: String,
     pub email: String,
-    pub password_hash: String,
+    pub password: String,
 }
 
-// Manual Debug impls keep the hash out of logs.
-impl fmt::Debug for User {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("User")
-            .field("user_id", &self.user_id)
-            .field("username", &self.username)
-            .field("email", &self.email)
-            .field("password_hash", &"<redacted>")
-            .field("created_at", &self.created_at)
-            .field("updated_at", &self.updated_at)
-            .finish()
-    }
-}
-
+// Manual Debug impl keeps the password out of logs.
 impl fmt::Debug for NewUser {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NewUser")
             .field("username", &self.username)
             .field("email", &self.email)
-            .field("password_hash", &"<redacted>")
+            .field("password", &"<redacted>")
             .finish()
     }
 }
@@ -69,9 +58,8 @@ fn from_row(row: &Row) -> Result<User, DbError> {
         user_id: row.try_get(0).map_err(DbError::from_pg)?,
         username: row.try_get(1).map_err(DbError::from_pg)?,
         email: row.try_get(2).map_err(DbError::from_pg)?,
-        password_hash: row.try_get(3).map_err(DbError::from_pg)?,
-        created_at: row.try_get(4).map_err(DbError::from_pg)?,
-        updated_at: row.try_get(5).map_err(DbError::from_pg)?,
+        created_at: row.try_get(3).map_err(DbError::from_pg)?,
+        updated_at: row.try_get(4).map_err(DbError::from_pg)?,
     })
 }
 
@@ -90,6 +78,18 @@ fn map_insert_err(e: postgres::Error) -> DbError {
         }
     }
     DbError::from_pg(e)
+}
+
+/// Verifies `password` against a found user. Unknown user and wrong password both give
+/// `None`, and an unknown user still pays the hashing cost.
+fn check_password(found: Option<(User, String)>, password: &str) -> Result<Option<User>, DbError> {
+    match found {
+        Some((user, hash)) => Ok(verify_password(password, &hash)?.then_some(user)),
+        None => {
+            burn_verify(password);
+            Ok(None)
+        }
+    }
 }
 
 impl Database {
@@ -117,7 +117,7 @@ impl Database {
             .map_err(DbError::from_pg)
     }
 
-    /// Inserts a user and returns the stored row.
+    /// Hashes the password, inserts the user and returns the stored row.
     /// Fails with `UsernameTaken` / `EmailTaken` on duplicates (compared normalized).
     pub fn insert_user(&mut self, new: &NewUser) -> Result<User, DbError> {
         let username_normalized = normalize(&new.username);
@@ -128,9 +128,10 @@ impl Database {
         if email_normalized.is_empty() {
             return Err(DbError::InvalidInput("email is empty".into()));
         }
-        if new.password_hash.is_empty() {
-            return Err(DbError::InvalidInput("password_hash is empty".into()));
+        if new.password.is_empty() {
+            return Err(DbError::InvalidInput("password is empty".into()));
         }
+        let password_hash = hash_password(&new.password)?;
 
         let sql = format!(
             "INSERT INTO users (username, username_normalized, email, email_normalized, password_hash)
@@ -146,38 +147,70 @@ impl Database {
                     &username_normalized,
                     &new.email,
                     &email_normalized,
-                    &new.password_hash,
+                    &password_hash,
                 ],
             )
             .map_err(map_insert_err)?;
         from_row(&row)
     }
 
+    /// Returns the user if the username and password match, otherwise `None`
+    /// (unknown user and wrong password are deliberately indistinguishable).
+    pub fn authenticate_by_username(
+        &mut self,
+        username: &str,
+        password: &str,
+    ) -> Result<Option<User>, DbError> {
+        let found = self.find("username_normalized", &normalize(username))?;
+        check_password(found, password)
+    }
+
+    /// Same as [`Database::authenticate_by_username`], but identifies the user by email.
+    pub fn authenticate_by_email(
+        &mut self,
+        email: &str,
+        password: &str,
+    ) -> Result<Option<User>, DbError> {
+        let found = self.find("email_normalized", &normalize(email))?;
+        check_password(found, password)
+    }
+
     pub fn get_user_by_id(&mut self, user_id: Uuid) -> Result<Option<User>, DbError> {
-        self.find_user("user_id", &user_id)
+        Ok(self.find("user_id", &user_id)?.map(|(user, _)| user))
     }
 
     /// Case-insensitive lookup (input is normalized).
     pub fn get_user_by_username(&mut self, username: &str) -> Result<Option<User>, DbError> {
-        self.find_user("username_normalized", &normalize(username))
+        Ok(self
+            .find("username_normalized", &normalize(username))?
+            .map(|(user, _)| user))
     }
 
     /// Case-insensitive lookup (input is normalized).
     pub fn get_user_by_email(&mut self, email: &str) -> Result<Option<User>, DbError> {
-        self.find_user("email_normalized", &normalize(email))
+        Ok(self
+            .find("email_normalized", &normalize(email))?
+            .map(|(user, _)| user))
     }
 
-    fn find_user(
+    /// Internal lookup returning the user together with its stored hash.
+    fn find(
         &mut self,
         column: &'static str,
         value: &(dyn ToSql + Sync),
-    ) -> Result<Option<User>, DbError> {
-        let sql = format!("SELECT {COLS} FROM users WHERE {column} = $1");
+    ) -> Result<Option<(User, String)>, DbError> {
+        let sql = format!("SELECT {COLS}, password_hash FROM users WHERE {column} = $1");
         let row = self
             .client
             .query_opt(&sql, &[value])
             .map_err(DbError::from_pg)?;
-        row.as_ref().map(from_row).transpose()
+        match row {
+            Some(row) => {
+                let hash: String = row.try_get(5).map_err(DbError::from_pg)?;
+                Ok(Some((from_row(&row)?, hash)))
+            }
+            None => Ok(None),
+        }
     }
 }
 

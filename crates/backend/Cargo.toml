@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 actix-web = { version = "4.18.1" }
+argon2 = { version = "0.5", features = ["std"] }
 uuid = { version = "1.29.0", features = ["v4"] }
 serde = { version = "1.0.229", features = ["derive"] }
 env_logger = { version = "0.11.11" }

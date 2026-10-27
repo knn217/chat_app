@@ -5,12 +5,15 @@
 //! (e.g. to `tokio-postgres`) without touching any caller.
 
 mod error;
+mod password;
 mod tls;
 mod txn;
 mod users;
 
 pub use error::DbError;
-pub use users::NewUser;
+pub use users::{NewUser, User};
+/// Re-exported so callers don't need their own `uuid` dependency.
+pub use uuid::Uuid;
 
 use postgres::Client;
 use std::env;
