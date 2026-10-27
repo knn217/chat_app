@@ -184,15 +184,16 @@ build(){
             --profile=$BUILD_PROFILE \
             --message-format=json-render-diagnostics) || exit 1
 
-        # Copy exe bin into the package folder
-        # TAR_PATH=$(jq -r -s 'map(select(.reason == "compiler-artifact" and .executable != null)) | last | .filenames[0] | capture("(?<dir>.*)/[^/]+$") | .dir' <<< "$JSON") || exit 1
-        # BIN_NAME=$(jq -r -s 'map(select(.reason == "compiler-artifact" and .executable != null)) | last | .executable | split("/") | last' <<< "$JSON") || exit 1
-        local BIN_PATH=$(jq -r -s 'map(select(.reason == "compiler-artifact" and .executable != null)) | last | .executable' <<< "$JSON") || exit 1
-        local PKG_PATH="$SCRIPTDIR/target/$BUILD_PROFILE/package/$PKG"
-        # Recreate package path
-        rm -rf "$PKG_PATH"
-        mkdir -p "$PKG_PATH"
-        cp "$BIN_PATH" "$PKG_PATH" || exit 1
+        # Copy each exe bin into the package folder
+        mapfile -t BIN_PATHS < <(jq -r -s 'map(select(.reason == "compiler-artifact" and .executable != null)) | .[].executable' <<< "$JSON")
+        for BIN_PATH in "${BIN_PATHS[@]}"; do
+            local BIN=$(basename "$BIN_PATH")
+            local PKG_PATH="$SCRIPTDIR/target/$BUILD_PROFILE/package/$BIN"
+            # Recreate package path
+            rm -rf "$PKG_PATH"
+            mkdir -p "$PKG_PATH"
+            cp "$BIN_PATH" "$PKG_PATH" || exit 1
+        done
     done
 
     # Copy resources into the frontend package folder
@@ -271,7 +272,7 @@ run(){
         RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || {
             $TARGET_PATH/package/database/uninstall.sh
             exit 1
-            }
+        }
     else
         local PROFILING_PATH="$TARGET_PATH/profiling"
         rm -rf "$PROFILING_PATH"

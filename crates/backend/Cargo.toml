@@ -4,6 +4,15 @@ edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "backend"
+path = "src/main.rs"
+
+[[bin]]
+# Same as "backend", but generate and host OpenApi documents for generating automation test
+name = "openapi_docs"
+path = "src/docs_openapi.rs"
+
 [lints]
 workspace = true
 
