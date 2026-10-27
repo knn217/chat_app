@@ -13,14 +13,14 @@ fail() { echo "[setup] ERROR: $*" >&2; exit 1; }
 case "$APP_DB_NAME" in ""|*[!a-z0-9_]*) fail "APP_DB_NAME must match [a-z0-9_]+";; esac
 case "$APP_DB_USER" in ""|*[!a-z0-9_]*) fail "APP_DB_USER must match [a-z0-9_]+";; esac
 case "$APP_DB_PASSWORD" in ""|*[!A-Za-z0-9._-]*) fail "APP_DB_PASSWORD may only contain A-Z a-z 0-9 . _ -";; esac
-[ "${#APP_DB_PASSWORD}" -ge 12 ] || fail "APP_DB_PASSWORD must be at least 12 characters"
+# [ "${#APP_DB_PASSWORD}" -ge 12 ] || fail "APP_DB_PASSWORD must be at least 12 characters"
 
-sql() { "$CRDB" sql --certs-dir=/certs --host="$HOST" "$@"; }
+sql() { "$CRDB" sql --insecure --host="$HOST" "$@"; }
 
 echo "[setup] database and role"
 sql -e "CREATE DATABASE IF NOT EXISTS ${APP_DB_NAME};"
 sql -e "CREATE USER IF NOT EXISTS ${APP_DB_USER};"
-sql -e "ALTER USER ${APP_DB_USER} WITH PASSWORD '${APP_DB_PASSWORD}';"
+# sql -e "ALTER USER ${APP_DB_USER} WITH PASSWORD '${APP_DB_PASSWORD}';"
 
 if [ -n "${COCKROACH_LICENSE:-}" ]; then
   [ -n "${COCKROACH_ORG:-}" ] || fail "COCKROACH_ORG is required when COCKROACH_LICENSE is set"

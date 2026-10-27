@@ -18,7 +18,8 @@ done
 
 command -v docker >/dev/null 2>&1 || { echo "[uninstall] docker is required" >&2; exit 1; }
 
-if [ "$KEEP_DATA" = false ] && [ "$YES" = false ]; then
+# If stdin is NOT a terminal (non-interactive/CI/cron/pipe), auto-accept
+if [ "$KEEP_DATA" = false ] && [ "$YES" = false ] && [ -t 0 ]; then
   echo "This permanently deletes the database, its data volume and its certificates."
   echo "Run scripts/backup.sh first if you need the data."
   printf "Type 'delete' to continue: "

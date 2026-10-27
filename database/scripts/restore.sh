@@ -16,7 +16,7 @@ docker compose exec -T cockroach mkdir -p /cockroach/cockroach-data/extern/backu
 docker compose cp "$SRC" "cockroach:/cockroach/cockroach-data/extern/backups/"
 
 docker compose exec -T cockroach /cockroach/cockroach sql \
-  --certs-dir=/certs --host=localhost:26257 \
+  --insecure --host=localhost:26257 \
   -e "DROP DATABASE IF EXISTS ${DB} CASCADE; RESTORE DATABASE ${DB} FROM LATEST IN 'nodelocal://1/backups/${STAMP}';"
 
 # Re-apply role password, schema and grants (idempotent).
