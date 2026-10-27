@@ -10,6 +10,7 @@ use std::{fmt, time::SystemTime};
 // dep
 use serde::Deserialize;
 use tokio_postgres::{Row, error::SqlState, types::ToSql};
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
@@ -54,12 +55,15 @@ fn validate_password(password: &str) -> Result<(), ValidationError> {
 }
 
 /// Input for [`Database::insert_user`]. `password` is plaintext and is hashed internally.
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, ToSchema)]
 pub struct NewUser {
+    #[schema(example = "John Smith")]
     #[validate(length(min = 3, max = 50))]
     pub username: String,
+    #[schema(example = "johnsmith@gmail.com")]
     #[validate(email)]
     pub email: String,
+    #[schema(example = "John@Smith123")]
     #[validate(custom(function = "validate_password"))]
     pub password: String,
 }
