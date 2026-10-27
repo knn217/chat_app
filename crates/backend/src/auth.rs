@@ -1,5 +1,5 @@
 // Dep
-use actix_web::{Error, HttpResponse, error::ErrorInternalServerError, get, post};
+use actix_web::{Error, HttpResponse, error::ErrorInternalServerError, get, post, web};
 use actix_web_validator::Json;
 
 // Local
@@ -10,11 +10,7 @@ async fn me() -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().body("Hello world!"))
 }
 #[post("/register")]
-async fn register(req_body: Json<NewUser>) -> Result<HttpResponse, Error> {
-    // Connect to db
-    let db = Database::connect_from_env()
-        .await
-        .map_err(|e| ErrorInternalServerError(format!("Database connection failed: {:?}", e)))?;
+async fn register(db: web::Data<Database>, req_body: Json<NewUser>) -> Result<HttpResponse, Error> {
     // Insert to db
     let _user = db
         .insert_user(&req_body)
