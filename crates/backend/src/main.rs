@@ -1,10 +1,15 @@
+// std
+use std::net::Ipv4Addr;
+
 // Dep
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use env_logger::Env;
+use utoipa_actix_web::AppExt;
 
 // Local
 pub mod auth;
 pub mod db;
+pub mod server;
 use db::Database;
 
 // Main function use actix web's async runtime
@@ -26,18 +31,11 @@ async fn main() -> std::io::Result<()> {
             .wrap(Logger::default())
             .wrap(Logger::new("%a %{User-Agent}i"))
             .app_data(db.clone()) // cheap Arc clone per worker
-            .service(
-                web::scope("/api/v1/auth")
-                    .service(auth::me)
-                    .service(auth::register)
-                    .service(auth::login)
-                    .service(auth::refresh)
-                    .service(auth::logout),
-            )
-        // .service(auth::hello)
-        // .service(auth::echo)
+            .into_utoipa_app() // Convert into UtoipaApp for configure
+            .configure(server::config_server)
+            .into_app() // Convert back
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((Ipv4Addr::UNSPECIFIED, 8080))?
     .run()
     .await
 }
