@@ -9,6 +9,7 @@ LOG_LEVEL=""
 RUN_PROFILE=""
 PROFILING=false
 PROFILING_TYPE=""
+TEST=false
 JOBS=1
 
 main(){
@@ -31,6 +32,7 @@ parse(){
     v
     r:
     p:
+    t
     j:
     "
     local LONG_OPTS="
@@ -40,6 +42,7 @@ parse(){
     verbose,
     run:,
     profile:,
+    test,
     jobs:
     "
     local TEMP=$(getopt \
@@ -61,6 +64,7 @@ parse(){
             -v | --verbose ) LOG_LEVEL=-vv; shift ;;
             -r | --run )     RUN_PROFILE="$2"; shift 2 ;;
             -p | --profile ) PROFILING=true; PROFILING_TYPE="$2"; shift 2 ;;
+            -t | --test )    TEST=true; shift ;;
             -j | --jobs )    JOBS="$2"; shift 2 ;;
             -- ) shift; break ;;
             * ) break ;;
@@ -80,6 +84,7 @@ help(){
     echo "<-v | --verbose>:              Toggle to enable verbosed logs"
     echo "<-r | --run>:                  Run one of the targets in cargo.toml           [dev | release | ...]"
     echo "<-p | --profile>:              Run perf profiling, use one of the categories  ["" | mem | c2c | sched | ...]"
+    echo "<-t | --test>:                 Toggle to run automation and stress tests"
     echo "<-j | --jobs>:                 The number of build jobs                       [1 | 2 | 3 | ...]"
     echo "================="
     exit 0
@@ -94,6 +99,7 @@ choices(){
     echo "RUN_PROFILE:      $RUN_PROFILE"
     echo "PROFILING:        $PROFILING"
     echo "PROFILING_TYPE:   $PROFILING_TYPE"
+    echo "TEST:             $TEST"
     echo "JOBS:             $JOBS"
     echo "================="
 }
@@ -121,6 +127,9 @@ setup_env_linux(){
             echo "$pkg already installed"
         fi
     done
+
+    # schemathesis for autogen OpenApi tests
+    uv tool install schemathesis
 }
 
 setup_env_windows(){
@@ -253,7 +262,7 @@ resources(){
 }
 
 run(){
-    if [ -z "${RUN_PROFILE}" ]; then
+    if [ -z "${RUN_PROFILE}" ] && [ "$TEST" == "false" ]; then
         return
     fi
 
@@ -268,8 +277,34 @@ run(){
     $TARGET_PATH/package/database/install.sh
     export DATABASE_URL="postgresql://root@localhost:26257/chat_db?sslmode=disable"
 
+    if [ "$TEST" == "true" ]; then
+        # Run backend in the background and save its PID
+        $PACKAGE_PATH/backend/backend &
+        PID=$!
+        echo "Started BE in background process with PID: $PID"
+
+        # Wait 2 sec for BE init
+        echo "Wait 2 seconds for BE to init..."
+        sleep 2
+
+        # Generate openapi.json and run tests
+        $PACKAGE_PATH/openapi_docs/openapi_docs
+        schemathesis run "./openapi.json" --url=http://localhost:8080
+
+        # Stop the process after the step is complete
+        echo "Stopping the background BE process..."
+        kill $PID
+
+        # Wait to ensure it has fully terminated
+        wait $PID 2>/dev/null
+        echo "Process stopped."
+
+        $TARGET_PATH/package/database/uninstall.sh
+        return
+    fi
+
     if [ "$PROFILING" == "false" ]; then
-        RUST_BACKTRACE=full "$PACKAGE_PATH/openapi_docs/openapi_docs" || {
+        RUST_BACKTRACE=full "$PACKAGE_PATH/backend/backend" || {
             $TARGET_PATH/package/database/uninstall.sh
             exit 1
         }
@@ -288,7 +323,7 @@ run(){
         # Run perf
         perf $PROFILING_TYPE record \
             -o "$PROFILING_PATH/perf.data" \
-            "$PACKAGE_PATH/openapi_docs/openapi_docs"
+            "$PACKAGE_PATH/backend/backend"
         perf report \
             --stdio \
             --no-inline \

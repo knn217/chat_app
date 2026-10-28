@@ -17,7 +17,7 @@ async fn me() -> Result<HttpResponse, Error> {
 }
 #[utoipa::path(
     responses(
-        (status = 200, description = "Success")
+        (status = 201, description = "Success")
     )
 )]
 #[post("/register")]
