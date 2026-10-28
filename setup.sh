@@ -261,7 +261,7 @@ run(){
     cargo test --workspace || exit 1
 
     local TARGET_PATH="$SCRIPTDIR/target/$RUN_PROFILE"
-    local PACKAGE_PATH="$TARGET_PATH/package/backend"
+    local PACKAGE_PATH="$TARGET_PATH/package"
     # Setup database
     # docker compose cp cockroach:/certs/ca.crt ./ca.crt
     # docker compose up -d --build
@@ -269,7 +269,7 @@ run(){
     export DATABASE_URL="postgresql://root@localhost:26257/chat_db?sslmode=disable"
 
     if [ "$PROFILING" == "false" ]; then
-        RUST_BACKTRACE=full "$PACKAGE_PATH/backend" || {
+        RUST_BACKTRACE=full "$PACKAGE_PATH/openapi_docs/openapi_docs" || {
             $TARGET_PATH/package/database/uninstall.sh
             exit 1
         }
@@ -288,7 +288,7 @@ run(){
         # Run perf
         perf $PROFILING_TYPE record \
             -o "$PROFILING_PATH/perf.data" \
-            "$PACKAGE_PATH/backend"
+            "$PACKAGE_PATH/openapi_docs/openapi_docs"
         perf report \
             --stdio \
             --no-inline \
