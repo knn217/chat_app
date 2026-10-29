@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{extract::Json, extract::State, extract::rejection::JsonRejection, http::StatusCode};
+use validator::Validate;
 
 // Local
 use crate::db::{Database, DbError, NewUser};
@@ -22,12 +23,24 @@ pub async fn me() -> Result<(StatusCode, String), StatusCode> {
 )]
 pub async fn register(
     State(db): State<Arc<Database>>,
-    req_body: Json<NewUser>,
-) -> Result<(StatusCode, ()), StatusCode> {
+    payload: Result<Json<NewUser>, JsonRejection>, // Capture Axum's JsonRejection instead of letting it auto-fail
+) -> Result<(StatusCode, ()), (StatusCode, String)> {
+    // Validate request body
+    let Json(new_user) = payload.map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
+    new_user.validate().map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Validation error: {}", err),
+        )
+    })?;
+
     // Insert to db
-    let _user = db.insert_user(&req_body).await.map_err(|e| match e {
-        DbError::UsernameTaken => StatusCode::CONFLICT,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    let _user = db.insert_user(&new_user).await.map_err(|e| match e {
+        DbError::UsernameTaken => (StatusCode::CONFLICT, "Username taken".to_string()),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal error".to_string(),
+        ),
     })?;
     // Response
     Ok((StatusCode::CREATED, ()))
