@@ -34,9 +34,9 @@ pub struct User {
 }
 
 fn validate_password(password: &str) -> Result<(), ValidationError> {
-    if password.len() < 8 {
+    if password.len() < 8 || password.len() > 128 {
         let mut err = ValidationError::new("length");
-        err.message = Some("Password must be at least 8 characters long".into());
+        err.message = Some("Password must be at least 8 and most 128 characters long".into());
         return Err(err);
     }
 
@@ -45,9 +45,24 @@ fn validate_password(password: &str) -> Result<(), ValidationError> {
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
     let has_special = password.chars().any(|c| "@$!%*?&".contains(c));
 
-    if !has_lowercase || !has_uppercase || !has_digit || !has_special {
+    if !has_lowercase {
         let mut err = ValidationError::new("complexity");
-        err.message = Some("Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character".into());
+        err.message = Some("Password must contain at least one lowercase letter".into());
+        return Err(err);
+    }
+    if !has_uppercase {
+        let mut err = ValidationError::new("complexity");
+        err.message = Some("Password must contain at least one uppercase letter".into());
+        return Err(err);
+    }
+    if !has_digit {
+        let mut err = ValidationError::new("complexity");
+        err.message = Some("Password must contain at least one number".into());
+        return Err(err);
+    }
+    if !has_special {
+        let mut err = ValidationError::new("complexity");
+        err.message = Some("Password must contain at least one special character".into());
         return Err(err);
     }
 
@@ -56,15 +71,24 @@ fn validate_password(password: &str) -> Result<(), ValidationError> {
 
 /// Input for [`Database::insert_user`]. `password` is plaintext and is hashed internally.
 #[derive(Deserialize, Validate, ToSchema)]
+#[serde(deny_unknown_fields)] // Rejects unknown JSON fields with a 400 instead of ignoring them silently
 pub struct NewUser {
-    #[schema(example = "John Smith")]
-    #[validate(length(min = 3, max = 50))]
+    #[schema(example = "John Smith", min_length = 3, max_length = 64)] // Add utoipa constraints here
+    #[validate(length(min = 3, max = 64))]
     pub username: String,
-    #[schema(example = "johnsmith@gmail.com")]
-    #[validate(email)]
+
+    #[schema(
+        example = "johnsmith@gmail.com", min_length = 5, max_length = 254, 
+        format = "email"  // Tells OpenAPI and fuzzers that this must follow email formatting
+    )]
+    #[validate(email, length(max = 254))]
     pub email: String,
-    #[schema(example = "John@Smith123")]
-    #[validate(custom(function = "validate_password"))]
+
+    #[schema(
+        example = "John@Smith123", min_length = 8, max_length = 128,
+        pattern = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,128}$", // Regex for generating passwords
+    )]
+    #[validate(custom(function = "validate_password"), length(min = 8, max = 128))]
     pub password: String,
 }
 

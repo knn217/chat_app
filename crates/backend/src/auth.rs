@@ -26,20 +26,20 @@ pub async fn register(
     payload: Result<Json<NewUser>, JsonRejection>, // Capture Axum's JsonRejection instead of letting it auto-fail
 ) -> Result<(StatusCode, ()), (StatusCode, String)> {
     // Validate request body
-    let Json(new_user) = payload.map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
-    new_user.validate().map_err(|err| {
+    let Json(new_user) = payload.map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    new_user.validate().map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
-            format!("Validation error: {}", err),
+            format!("Invalid request body error: {}", e),
         )
     })?;
 
     // Insert to db
     let _user = db.insert_user(&new_user).await.map_err(|e| match e {
-        DbError::UsernameTaken => (StatusCode::CONFLICT, "Username taken".to_string()),
+        DbError::UsernameTaken => (StatusCode::CONFLICT, format!("Failed DB insertion: {}", e)),
         _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal error".to_string(),
+            format!("Failed DB insertion: {}", e),
         ),
     })?;
     // Response
