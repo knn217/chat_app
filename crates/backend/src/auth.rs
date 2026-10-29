@@ -17,7 +17,10 @@ async fn me() -> Result<HttpResponse, Error> {
 }
 #[utoipa::path(
     responses(
-        (status = 201, description = "Success")
+        (status = 201, description = "User registered successfully"),
+        (status = 400, description = "Bad request (invalid JSON or payload syntax)"),
+        (status = 409, description = "Username already taken"),
+        (status = 500, description = "Internal server error"),
     )
 )]
 #[post("/register")]

@@ -289,7 +289,9 @@ run(){
 
         # Generate openapi.json and run tests
         $PACKAGE_PATH/openapi_docs/openapi_docs
-        schemathesis run "./openapi.json" --url=http://localhost:8080
+        schemathesis run "./openapi.json" \
+            --url=http://localhost:8080
+            # --exclude-checks unsupported_method
 
         # Stop the process after the step is complete
         echo "Stopping the background BE process..."

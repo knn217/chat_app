@@ -34,6 +34,7 @@ async fn main() -> std::io::Result<()> {
             .into_utoipa_app() // Convert into UtoipaApp for configure
             .configure(server::config_server)
             .into_app() // Convert back
+            .default_service(web::to(server::default_handler))
     })
     .bind((Ipv4Addr::UNSPECIFIED, 8080))?
     .run()
