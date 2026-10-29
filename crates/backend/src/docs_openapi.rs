@@ -1,21 +1,10 @@
-// dep
-use actix_web::App;
-use env_logger::Env;
-use utoipa_actix_web::AppExt;
-
-// local
 pub mod auth;
 pub mod db;
 pub mod server;
 
-fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
-
-    // 1. Build the App and split it to get the 'api' specification
-    let (_app, api) = App::new()
-        .into_utoipa_app()
-        .configure(server::config_server)
-        .split_for_parts();
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let (_router, api) = server::create_router_api().await?;
 
     // 2. Write the JSON file directly to your local machine
     std::fs::write(

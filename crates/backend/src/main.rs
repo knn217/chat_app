@@ -1,42 +1,64 @@
-// std
 use std::net::Ipv4Addr;
 
-// Dep
-use actix_web::{App, HttpServer, middleware::Logger, web};
-use env_logger::Env;
-use utoipa_actix_web::AppExt;
+use tokio::net::TcpListener;
+use tokio::signal;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+// use utoipa_swagger_ui::SwaggerUi;
 
-// Local
 pub mod auth;
 pub mod db;
 pub mod server;
-use db::Database;
 
-// Main function use actix web's async runtime
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_target(false),
+        )
+        .init();
 
-    // Connect once, here, inside the runtime.
-    let db = Database::connect_from_env()
-        .await
-        .expect("failed to connect to database");
-    db.create_users_table()
-        .await
-        .expect("failed to create users table");
-    let db = web::Data::new(db);
+    let (router, _api) = server::create_router_api().await?;
 
-    HttpServer::new(move || {
-        App::new()
-            .wrap(Logger::default())
-            .wrap(Logger::new("%a %{User-Agent}i"))
-            .app_data(db.clone()) // cheap Arc clone per worker
-            .into_utoipa_app() // Convert into UtoipaApp for configure
-            .configure(server::config_server)
-            .into_app() // Convert back
-            .default_service(web::to(server::default_handler))
-    })
-    .bind((Ipv4Addr::UNSPECIFIED, 8080))?
-    .run()
-    .await
+    // let router = router.merge(SwaggerUi::new("/swagger-ui").url("/apidoc/openapi.json", _api));
+
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 8080)).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    Ok(())
+}
+
+/// Helper function that listens for Ctrl+C or termination signals
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            tracing::info!("Received Ctrl+C, shutting down gracefully...");
+        },
+        _ = terminate => {
+            tracing::debug!("Received SIGTERM, shutting down gracefully...");
+        },
+    }
 }

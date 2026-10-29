@@ -1,21 +1,18 @@
-// Dep
-use actix_web::{Error, HttpResponse, error, get, post, web};
-use actix_web_validator::Json;
-use utoipa;
+use std::sync::Arc;
+
+use axum::{Json, extract::State, http::StatusCode};
 
 // Local
 use crate::db::{Database, DbError, NewUser};
 
-#[utoipa::path(
-    responses(
-        (status = 200, description = "Success", body = NewUser)
-    )
-)]
-#[get("/me")]
-async fn me() -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().body("Hello world!"))
+#[utoipa::path(get, path = "", responses((status = OK, body = String)))]
+pub async fn me() -> Result<(StatusCode, String), StatusCode> {
+    Ok((StatusCode::OK, "Hello world!".into()))
 }
+
 #[utoipa::path(
+    post,
+    path = "",
     responses(
         (status = 201, description = "User registered successfully"),
         (status = 400, description = "Bad request (invalid JSON or payload syntax)"),
@@ -23,42 +20,15 @@ async fn me() -> Result<HttpResponse, Error> {
         (status = 500, description = "Internal server error"),
     )
 )]
-#[post("/register")]
-async fn register(db: web::Data<Database>, req_body: Json<NewUser>) -> Result<HttpResponse, Error> {
+pub async fn register(
+    State(db): State<Arc<Database>>,
+    req_body: Json<NewUser>,
+) -> Result<(StatusCode, ()), StatusCode> {
     // Insert to db
     let _user = db.insert_user(&req_body).await.map_err(|e| match e {
-        DbError::UsernameTaken => {
-            error::ErrorConflict(format!("Database insertion failed: {:?}", e))
-        }
-        _ => error::ErrorInternalServerError(format!("Database insertion failed: {:?}", e)),
+        DbError::UsernameTaken => StatusCode::CONFLICT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     })?;
     // Response
-    Ok(HttpResponse::Created().finish())
-}
-#[utoipa::path(
-    responses(
-        (status = 200, description = "Success", body = String)
-    )
-)]
-#[post("/login")]
-async fn login(req_body: String) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().body(req_body))
-}
-#[utoipa::path(
-    responses(
-        (status = 200, description = "Success", body = String)
-    )
-)]
-#[post("/refresh")]
-async fn refresh(req_body: String) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().body(req_body))
-}
-#[utoipa::path(
-    responses(
-        (status = 200, description = "Success", body = String)
-    )
-)]
-#[post("/logout")]
-async fn logout(req_body: String) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().body(req_body))
+    Ok((StatusCode::CREATED, ()))
 }

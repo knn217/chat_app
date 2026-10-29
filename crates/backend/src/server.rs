@@ -1,26 +1,45 @@
-// Dep
-use actix_web::{HttpRequest, HttpResponse};
-use utoipa_actix_web::scope;
-use utoipa_actix_web::service_config::ServiceConfig;
+use std::sync::Arc;
 
-// Local
+use axum::Router;
+use utoipa::{OpenApi, openapi};
+use utoipa_axum::{router::OpenApiRouter, routes};
+
 use crate::auth;
+use crate::db::Database;
 
-pub async fn default_handler(req: HttpRequest) -> HttpResponse {
-    if req.resource_map().has_resource(req.path()) {
-        HttpResponse::MethodNotAllowed().finish()
-    } else {
-        HttpResponse::NotFound().finish()
-    }
+// const CUSTOMER_TAG: &str = "customer";
+// const ORDER_TAG: &str = "order";
+
+#[derive(OpenApi)]
+#[openapi(
+    tags(
+        // (name = CUSTOMER_TAG, description = "Customer API endpoints"),
+        // (name = ORDER_TAG, description = "Order API endpoints")
+    )
+)]
+struct ApiDoc;
+
+async fn router() -> std::io::Result<OpenApiRouter> {
+    // Connect once, here, inside the runtime.
+    let db = Database::connect_from_env()
+        .await
+        .expect("failed to connect to database");
+    db.create_users_table()
+        .await
+        .expect("failed to create users table");
+
+    Ok(OpenApiRouter::new()
+        .nest("/me", OpenApiRouter::new().routes(routes!(auth::me)))
+        .nest(
+            "/register",
+            OpenApiRouter::new().routes(routes!(auth::register)),
+        )
+        .with_state(Arc::new(db)))
 }
 
-pub fn config_server(cfg: &mut ServiceConfig) {
-    cfg.service(
-        scope::scope("/api/v1/auth")
-            .service(auth::me)
-            .service(auth::register)
-            .service(auth::login)
-            .service(auth::refresh)
-            .service(auth::logout),
-    );
+pub async fn create_router_api() -> std::io::Result<(Router, openapi::OpenApi)> {
+    let router = router().await?;
+    Ok(OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .nest("/api/v1/auth", router)
+        .split_for_parts())
 }

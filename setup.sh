@@ -276,6 +276,8 @@ run(){
     # docker compose up -d --build
     $TARGET_PATH/package/database/install.sh
     export DATABASE_URL="postgresql://root@localhost:26257/chat_db?sslmode=disable"
+    # Generate openapi.json
+    $PACKAGE_PATH/openapi_docs/openapi_docs
 
     if [ "$TEST" == "true" ]; then
         # Run backend in the background and save its PID
@@ -287,8 +289,7 @@ run(){
         echo "Wait 2 seconds for BE to init..."
         sleep 2
 
-        # Generate openapi.json and run tests
-        $PACKAGE_PATH/openapi_docs/openapi_docs
+        # Run tests
         schemathesis run "./openapi.json" \
             --url=http://localhost:8080
             # --exclude-checks unsupported_method
