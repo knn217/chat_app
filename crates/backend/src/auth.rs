@@ -36,7 +36,9 @@ pub async fn register(
 
     // Insert to db
     let _user = db.insert_user(&new_user).await.map_err(|e| match e {
-        DbError::UsernameTaken => (StatusCode::CONFLICT, format!("Failed DB insertion: {}", e)),
+        DbError::UsernameTaken | DbError::EmailTaken => {
+            (StatusCode::CONFLICT, format!("Failed DB insertion: {}", e))
+        }
         _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed DB insertion: {}", e),
