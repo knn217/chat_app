@@ -2,7 +2,6 @@
 
 SCRIPTDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-HELP=false
 CLEAN=false
 BUILD_PROFILE=""
 LOG_LEVEL=""
@@ -14,7 +13,6 @@ JOBS=1
 
 main(){
     parse "$@"
-    help
     choices
     setup_env_linux
     setup_env_windows
@@ -58,7 +56,7 @@ parse(){
 
     while true; do
         case "$1" in 
-            -h | --help )    HELP=true; shift ;;
+            -h | --help )    help ;;
             -c | --clean )   CLEAN=true; shift ;;
             -b | --build )   BUILD_PROFILE="$2"; shift 2 ;;
             -v | --verbose ) LOG_LEVEL=-vv; shift ;;
@@ -73,9 +71,6 @@ parse(){
 }
 
 help(){
-    if [ "$HELP" == "false" ]; then
-        return
-    fi
     echo "================="
     echo "Arguments:"
     echo "<-h | --help>:                 Print help message"
