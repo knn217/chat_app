@@ -8,7 +8,7 @@ DB=${DB:-chat_db}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
 docker compose exec -T cockroach /cockroach/cockroach sql \
-  --insecure --host=localhost:26257 \
+  --certs-dir=/certs --host=localhost:26257 \
   -e "BACKUP DATABASE ${DB} INTO 'nodelocal://1/backups/${STAMP}';"
 
 mkdir -p backups
