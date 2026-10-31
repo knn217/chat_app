@@ -1,0 +1,5 @@
+# node-name dns-name private-ip
+# Replace with stable private DNS names and private IPs before generating certs.
+node1 db-1.internal.example 10.0.1.11
+node2 db-2.internal.example 10.0.1.12
+node3 db-3.internal.example 10.0.1.13

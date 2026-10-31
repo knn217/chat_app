@@ -1,0 +1,67 @@
+name: ${COMPOSE_PROJECT_NAME:-crdb}
+services:
+  node1:
+    image: ${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}
+    hostname: node1
+    command:
+      - start
+      - --certs-dir=/cockroach/certs
+      - --store=/cockroach/cockroach-data
+      - --listen-addr=0.0.0.0:26257
+      - --advertise-addr=node1:26257
+      - --http-addr=0.0.0.0:8080
+      - --join=node1:26257,node2:26257,node3:26257
+    ports: ["127.0.0.1:26257:26257", "127.0.0.1:8080:8080"]
+    volumes:
+      - node1-data:/cockroach/cockroach-data
+      - ./certs/node1:/cockroach/certs:ro
+    networks: [roachnet]
+    restart: unless-stopped
+    stop_grace_period: 5m
+
+  node2:
+    image: ${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}
+    hostname: node2
+    command:
+      - start
+      - --certs-dir=/cockroach/certs
+      - --store=/cockroach/cockroach-data
+      - --listen-addr=0.0.0.0:26257
+      - --advertise-addr=node2:26257
+      - --http-addr=0.0.0.0:8080
+      - --join=node1:26257,node2:26257,node3:26257
+    ports: ["127.0.0.1:26258:26257", "127.0.0.1:8081:8080"]
+    volumes:
+      - node2-data:/cockroach/cockroach-data
+      - ./certs/node2:/cockroach/certs:ro
+    networks: [roachnet]
+    restart: unless-stopped
+    stop_grace_period: 5m
+
+  node3:
+    image: ${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}
+    hostname: node3
+    command:
+      - start
+      - --certs-dir=/cockroach/certs
+      - --store=/cockroach/cockroach-data
+      - --listen-addr=0.0.0.0:26257
+      - --advertise-addr=node3:26257
+      - --http-addr=0.0.0.0:8080
+      - --join=node1:26257,node2:26257,node3:26257
+    ports: ["127.0.0.1:26259:26257", "127.0.0.1:8082:8080"]
+    volumes:
+      - node3-data:/cockroach/cockroach-data
+      - ./certs/node3:/cockroach/certs:ro
+    networks: [roachnet]
+    restart: unless-stopped
+    stop_grace_period: 5m
+
+networks:
+  roachnet:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

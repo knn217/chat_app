@@ -1,0 +1,22 @@
+# Optional local-dev node4. Generate certificates first (config/nodes.local includes node4).
+services:
+  node4:
+    image: ${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}
+    hostname: node4
+    command:
+      - start
+      - --certs-dir=/cockroach/certs
+      - --store=/cockroach/cockroach-data
+      - --listen-addr=0.0.0.0:26257
+      - --advertise-addr=node4:26257
+      - --http-addr=0.0.0.0:8080
+      - --join=node1:26257,node2:26257,node3:26257
+    ports: ["127.0.0.1:26260:26257", "127.0.0.1:8083:8080"]
+    volumes:
+      - node4-data:/cockroach/cockroach-data
+      - ./certs/node4:/cockroach/certs:ro
+    networks: [roachnet]
+    restart: unless-stopped
+    stop_grace_period: 5m
+volumes:
+  node4-data:

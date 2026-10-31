@@ -1,0 +1,8 @@
+.env
+certs/**
+!certs/.gitkeep
+secrets/**
+!secrets/.gitkeep
+data/**
+!data/.gitkeep
+*.tar.gz

@@ -1,0 +1,5 @@
+# node-name dns-name ip-address
+node1 node1 127.0.0.1
+node2 node2 127.0.0.1
+node3 node3 127.0.0.1
+node4 node4 127.0.0.1
