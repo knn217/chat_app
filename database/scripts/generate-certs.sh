@@ -15,7 +15,8 @@ fi
 
 # CockroachDB's own cert utility is used, avoiding a host CockroachDB install.
 docker pull "$IMAGE"
-docker run --rm -v "$ROOT:/work" -w /work "$IMAGE" cert create-ca \
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$ROOT:/work" -w /work "$IMAGE" cert create-ca \
   --certs-dir=/work/certs/ca --ca-key=/work/secrets/ca.key
 chmod 600 "$ROOT/secrets/ca.key"
 
@@ -24,7 +25,8 @@ while read -r name dns ip extra; do
   [[ -z "${dns:-}" || -z "${ip:-}" || -n "${extra:-}" ]] && { echo "Invalid node row: $name $dns $ip" >&2; exit 1; }
   mkdir -p "$ROOT/certs/$name"
   cp "$ROOT/certs/ca/ca.crt" "$ROOT/certs/$name/ca.crt"
-  docker run --rm -v "$ROOT:/work" -w /work "$IMAGE" cert create-node \
+  docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$ROOT:/work" -w /work "$IMAGE" cert create-node \
     "$name" "$dns" "$ip" localhost 127.0.0.1 \
     --certs-dir="/work/certs/$name" --ca-key=/work/secrets/ca.key
   chmod 600 "$ROOT/certs/$name/node.key"
@@ -32,7 +34,8 @@ done < "$NODES_FILE"
 
 mkdir -p "$ROOT/certs/client"
 cp "$ROOT/certs/ca/ca.crt" "$ROOT/certs/client/ca.crt"
-docker run --rm -v "$ROOT:/work" -w /work "$IMAGE" cert create-client root \
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$ROOT:/work" -w /work "$IMAGE" cert create-client root \
   --certs-dir=/work/certs/client --ca-key=/work/secrets/ca.key
 chmod 600 "$ROOT/certs/client/client.root.key"
 
