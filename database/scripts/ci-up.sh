@@ -50,5 +50,45 @@ if [[ "$initialized" != true ]]; then
   exit 1
 fi
 
+# Wait for all nodes to become live
+echo "Waiting for all 3 CockroachDB nodes to become live..."
+
+NETWORK="$(docker inspect "$container" \
+  --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+  | head -n 1)"
+
+CLIENT_CERTS="$ROOT/certs/client"
+live_nodes=0
+
+echo "Waiting for CockroachDB SQL endpoint..."
+
+connected=false
+
+for attempt in $(seq 1 60); do
+  if docker run --rm \
+    --network "$NETWORK" \
+    -v "$CLIENT_CERTS:/cockroach/certs:ro" \
+    "$COCKROACH_IMAGE" \
+    sql \
+    --certs-dir=/cockroach/certs \
+    --host=node1:26257 \
+    --execute="SELECT 1;" \
+    >/dev/null 2>&1; then
+    connected=true
+    echo "CockroachDB SQL endpoint is ready."
+    break
+  fi
+
+  echo "Waiting for SQL endpoint ($attempt/60)..."
+  sleep 2
+done
+
+if [[ "$connected" != true ]]; then
+  echo "CockroachDB SQL endpoint did not become ready." >&2
+  "${COMPOSE[@]}" ps >&2 || true
+  "${COMPOSE[@]}" logs --tail=100 --no-color >&2 || true
+  exit 1
+fi
+
 "${COMPOSE[@]}" ps
 echo "Secure three-node CockroachDB cluster initialized."

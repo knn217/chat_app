@@ -58,3 +58,8 @@ echo "Removing containers, networks, and volumes..."
   --timeout 10
 
 echo "CockroachDB CI cluster stopped and cleaned up."
+
+# Remove all the certs and secrets
+rm -rf "$ROOT/certs"
+rm -rf "$ROOT/secrets"
+echo "Removed all certs and secrets for this session."
