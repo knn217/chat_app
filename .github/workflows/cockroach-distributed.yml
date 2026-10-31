@@ -256,6 +256,13 @@ jobs:
             /tmp/crdb-client \
             /home/ubuntu/client-certs.tar.gz
 
+      - name: Test distributed CockroachDB cluster
+        env:
+          COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
+          COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+        run: |
+          bash database/scripts/local-test.sh
+
       - name: Collect diagnostics
         if: always()
         run: |
