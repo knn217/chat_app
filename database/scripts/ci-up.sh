@@ -25,16 +25,20 @@ fi
 
 # cockroach init is the cluster bootstrap operation. Retry while the nodes start.
 # It is executed once successfully; do not rerun it after success.
+# Initialize the cluster using the root client certificates.
 container="${COMPOSE_PROJECT_NAME}-node1-1"
 initialized=false
+
 for attempt in $(seq 1 60); do
-  if docker inspect "$container" >/dev/null 2>&1; then
-    if docker exec "$container" ./cockroach init \
-      --certs-dir=/cockroach/certs --host=node1:26257; then
+  if docker inspect "$container" >/dev/null 2>&1 &&
+     [[ "$(docker inspect -f '{{.State.Running}}' "$container")" == "true" ]]; then
+
+    if "$ROOT/scripts/init-cluster.sh" node1; then
       initialized=true
       break
     fi
   fi
+
   echo "Waiting for CockroachDB nodes before initialization ($attempt/60)..."
   sleep 5
 done
