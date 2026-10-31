@@ -1,0 +1,157 @@
+
+name: Multipass VM Proof of Concept
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  multipass-poc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check host virtualization support
+        run: |
+          echo "=== Host information ==="
+          uname -a
+          nproc
+          free -h
+          df -h /
+
+          echo "=== Hardware virtualization ==="
+          grep -m1 -Eo 'vmx|svm' /proc/cpuinfo || true
+
+          echo "=== KVM device ==="
+          if [[ -e /dev/kvm ]]; then
+            ls -l /dev/kvm
+          else
+            echo "/dev/kvm is not available"
+          fi
+
+      - name: Install Multipass
+        run: |
+          sudo snap install multipass
+
+          CERT=/var/snap/multipass/common/data/multipassd/multipass_root_cert.pem
+
+          echo "Waiting for Multipass to generate its root certificate..."
+          echo "This is a known issue: https://github.com/canonical/multipass/issues/5015"
+
+          for i in $(seq 1 60); do
+            if sudo test -s "$CERT"; then
+              echo "Root certificate generated."
+              break
+            fi
+
+            sleep 5
+          done
+
+          if ! sudo test -s "$CERT"; then
+            echo "Multipass root certificate was not generated."
+            sudo snap services multipass || true
+            sudo journalctl --unit 'snap.multipass*' -n 200 --no-pager || true
+            exit 1
+          fi
+
+          sudo multipass wait-ready
+          sudo multipass version
+
+      - name: Launch three Ubuntu VMs and test networking
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          nodes=(db-node1 db-node2 db-node3)
+
+          for node in "${nodes[@]}"; do
+            echo "Launching $node..."
+
+            sudo multipass launch 24.04 \
+              --name "$node" \
+              --cpus 1 \
+              --memory 2G \
+              --disk 4G \
+              --timeout 900
+          done
+
+          echo "=== Verify guest OS and kernel ==="
+
+          declare -A ips
+
+          for node in "${nodes[@]}"; do
+            sudo multipass exec "$node" -- bash -c '
+              cat /etc/os-release | grep -E "^(PRETTY_NAME|VERSION_ID)="
+              echo "Kernel: $(uname -r)"
+              echo "Hostname: $(hostname)"
+              echo "CPU count: $(nproc)"
+              free -h
+            '
+
+            ip=$(sudo multipass exec "$node" -- hostname -I | awk '{print $1}')
+
+            if [[ -z "$ip" ]]; then
+              echo "Could not obtain IP for $node" >&2
+              exit 1
+            fi
+
+            ips[$node]="$ip"
+            echo "$node = $ip"
+          done
+
+          echo "=== Start HTTP server in each guest ==="
+
+          for node in "${nodes[@]}"; do
+            sudo multipass exec "$node" -- bash -lc \
+              'nohup python3 -m http.server 8765 --bind 0.0.0.0 >/tmp/poc-http.log 2>&1 </dev/null &'
+          done
+
+          sleep 2
+
+          echo "=== Test host-to-guest connectivity ==="
+
+          for node in "${nodes[@]}"; do
+            ip="${ips[$node]}"
+
+            echo "Testing host -> $node ($ip)"
+
+            curl --fail --silent --show-error \
+              --max-time 5 \
+              "http://$ip:8765/" >/dev/null
+          done
+
+          echo "=== Test guest-to-guest connectivity ==="
+
+          for source in "${nodes[@]}"; do
+            for target in "${nodes[@]}"; do
+              [[ "$source" == "$target" ]] && continue
+
+              target_ip="${ips[$target]}"
+
+              echo "Testing $source -> $target ($target_ip)"
+
+              sudo multipass exec "$source" -- \
+                python3 -c \
+                "import urllib.request; urllib.request.urlopen('http://${target_ip}:8765/', timeout=5)"
+            done
+          done
+
+          echo "=== Multipass networking test passed ==="
+
+      - name: Show VM information
+        if: always()
+        run: |
+          sudo multipass list || true
+          sudo multipass info db-node1 || true
+          sudo multipass info db-node2 || true
+          sudo multipass info db-node3 || true
+
+      - name: Delete all Multipass VMs
+        if: always()
+        run: |
+          if command -v multipass >/dev/null 2>&1; then
+            sudo multipass delete --all || true
+            sudo multipass purge || true
+          fi
