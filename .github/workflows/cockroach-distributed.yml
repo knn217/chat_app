@@ -1,0 +1,279 @@
+name: CockroachDB Distributed Cluster
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_vms:
+        description: Keep Multipass VMs after the workflow (useful for debugging)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  distributed-cluster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Use root consistently for all Multipass commands.
+      - name: Install Multipass
+        run: |
+          sudo snap install multipass
+
+          CERT=/var/snap/multipass/common/data/multipassd/multipass_root_cert.pem
+
+          echo "Waiting for Multipass initialization..."
+
+          for i in $(seq 1 60); do
+            if sudo test -s "$CERT"; then
+              break
+            fi
+            sleep 5
+          done
+
+          if ! sudo test -s "$CERT"; then
+            echo "Multipass root certificate was not generated."
+            sudo snap services multipass || true
+            sudo journalctl --unit 'snap.multipass*' -n 200 --no-pager || true
+            exit 1
+          fi
+
+          sudo multipass wait-ready
+          sudo multipass version
+
+      - name: Launch Ubuntu guests
+        id: guests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for node in db-node1 db-node2 db-node3; do
+            echo "Launching $node..."
+
+            sudo multipass launch 24.04 \
+              --name "$node" \
+              --cpus 1 \
+              --memory 2G \
+              --disk 6G \
+              --timeout 900
+          done
+
+          declare -A ips
+
+          for node in db-node1 db-node2 db-node3; do
+            ip=$(sudo multipass exec "$node" -- hostname -I | awk '{print $1}')
+
+            if [[ -z "$ip" ]]; then
+              echo "Could not obtain IP for $node" >&2
+              exit 1
+            fi
+
+            ips[$node]="$ip"
+            echo "$node = $ip"
+          done
+
+          echo "node1_ip=${ips[db-node1]}" >> "$GITHUB_OUTPUT"
+          echo "node2_ip=${ips[db-node2]}" >> "$GITHUB_OUTPUT"
+          echo "node3_ip=${ips[db-node3]}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Docker inside guests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for node in db-node1 db-node2 db-node3; do
+            echo "Installing Docker on $node..."
+
+            sudo multipass exec "$node" -- sudo bash -lc '
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                docker.io \
+                docker-compose-v2
+
+              systemctl enable --now docker
+              docker version
+              docker compose version
+            '
+          done
+
+      - name: Generate certificates and deployment package
+        env:
+          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
+          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+        run: |
+          set -Eeuo pipefail
+
+          cat > "$RUNNER_TEMP/nodes.cloud" <<EOF
+          node1 node1 $NODE1_IP
+          node2 node2 $NODE2_IP
+          node3 node3 $NODE3_IP
+          EOF
+
+          echo "=== Nodes configuration ==="
+          cat "$RUNNER_TEMP/nodes.cloud"
+
+          echo "=== Generate certificates ==="
+          bash database/scripts/generate-certs.sh \
+            cloud "$RUNNER_TEMP/nodes.cloud"
+
+          echo "=== Package deployment files ==="
+          mkdir -p "$RUNNER_TEMP/package"
+          bash database/scripts/package.sh "$RUNNER_TEMP/package"
+
+          echo "PACKAGE=$RUNNER_TEMP/package/cockroach-cluster-package.tar.gz" \
+            >> "$GITHUB_ENV"
+
+      - name: Deploy one CockroachDB node per guest
+        env:
+          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
+          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          JOIN_ADDRS="$NODE1_IP:26257,$NODE2_IP:26257,$NODE3_IP:26257"
+
+          deploy_node() {
+            local vm="$1"
+            local node="$2"
+            local ip="$3"
+            local bundle="$RUNNER_TEMP/$node"
+
+            echo "=== Preparing deployment for $node ($ip) ==="
+
+            rm -rf "$bundle"
+            mkdir -p "$bundle/node-certs"
+
+            cp "$PACKAGE" "$bundle/cockroach-cluster-package.tar.gz"
+            cp -a "database/certs/$node/." "$bundle/node-certs/"
+
+            cat > "$bundle/.env" <<EOF
+          NODE_NAME=$node
+          NODE_ADVERTISE_ADDR=$ip
+          JOIN_ADDRS=$JOIN_ADDRS
+          COCKROACH_IMAGE=$COCKROACH_IMAGE
+          EOF
+
+            tar -czf "$RUNNER_TEMP/$node.tar.gz" \
+              -C "$bundle" .
+
+            sudo multipass transfer \
+              "$RUNNER_TEMP/$node.tar.gz" \
+              "$vm:/home/ubuntu/deploy.tar.gz"
+
+            sudo multipass exec "$vm" -- sudo bash -lc "
+              set -euo pipefail
+
+              mkdir -p /opt/crdb-deploy /opt/database
+
+              tar -xzf /home/ubuntu/deploy.tar.gz \
+                -C /opt/crdb-deploy
+
+              tar -xzf \
+                /opt/crdb-deploy/cockroach-cluster-package.tar.gz \
+                -C /opt
+
+              mkdir -p /opt/database/certs/$node
+              mkdir -p /opt/database/data/$node
+
+              cp -a /opt/crdb-deploy/node-certs/. \
+                /opt/database/certs/$node/
+
+              cp /opt/crdb-deploy/.env /opt/database/.env
+
+              cd /opt/database
+
+              docker compose -f docker-compose.cloud.yml up -d
+              docker ps
+            "
+          }
+
+          deploy_node db-node1 node1 "$NODE1_IP"
+          deploy_node db-node2 node2 "$NODE2_IP"
+          deploy_node db-node3 node3 "$NODE3_IP"
+
+      - name: Initialize CockroachDB cluster
+        env:
+          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "=== Prepare temporary root client certificate transfer ==="
+
+          tar -czf "$RUNNER_TEMP/client-certs.tar.gz" \
+            -C database/certs client
+
+          sudo multipass transfer \
+            "$RUNNER_TEMP/client-certs.tar.gz" \
+            db-node1:/home/ubuntu/client-certs.tar.gz
+
+          sudo multipass exec db-node1 -- sudo bash -lc '
+            mkdir -p /tmp/crdb-client
+            tar -xzf /home/ubuntu/client-certs.tar.gz \
+              -C /tmp/crdb-client
+          '
+
+          echo "=== Initialize cluster ==="
+
+          initialized=false
+
+          for attempt in $(seq 1 60); do
+            if sudo multipass exec db-node1 -- sudo docker run --rm \
+              --network host \
+              -v /tmp/crdb-client/client:/cockroach/certs:ro \
+              "$COCKROACH_IMAGE" \
+              init \
+              --certs-dir=/cockroach/certs \
+              --host="$NODE1_IP:26257"; then
+
+              initialized=true
+              break
+            fi
+
+            echo "Initialization attempt $attempt failed; retrying..."
+            sleep 5
+          done
+
+          if [[ "$initialized" != true ]]; then
+            echo "Cluster initialization failed." >&2
+            exit 1
+          fi
+
+          echo "=== Remove temporary client credentials from node1 ==="
+
+          sudo multipass exec db-node1 -- sudo rm -rf \
+            /tmp/crdb-client \
+            /home/ubuntu/client-certs.tar.gz
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          for node in db-node1 db-node2 db-node3; do
+            echo "========== $node =========="
+
+            sudo multipass info "$node" || true
+
+            sudo multipass exec "$node" -- \
+              sudo docker ps -a || true
+
+            sudo multipass exec "$node" -- \
+              sudo docker logs "cockroach-${node#db-}" \
+              --tail 100 || true
+          done
+
+      - name: Delete Multipass VMs
+        if: ${{ always() && !inputs.keep_vms }}
+        run: |
+          sudo multipass delete --all || true
+          sudo multipass purge || true
