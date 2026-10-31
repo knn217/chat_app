@@ -25,13 +25,13 @@ jobs:
 
       - name: Start and initialize secure cluster
         working-directory: database
-        run: bash scripts/ci-up.sh
+        run: bash scripts/local-up.sh
 
       - name: Verify cluster and SQL read/write
         working-directory: database
-        run: bash scripts/ci-test.sh
+        run: bash scripts/local-test.sh
 
       - name: Stop cluster and remove generated material
         if: always()
         working-directory: database
-        run: bash scripts/ci-down.sh
+        run: bash scripts/local-down.sh

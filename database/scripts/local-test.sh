@@ -9,7 +9,7 @@ export COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
 IMAGE="$COCKROACH_IMAGE"
 
 [[ -f "$ROOT/certs/client/client.root.crt" && -f "$ROOT/certs/client/client.root.key" ]] || {
-  echo "Client certificates are missing; run scripts/ci-up.sh first." >&2
+  echo "Client certificates are missing; run scripts/local-up.sh first." >&2
   exit 1
 }
 

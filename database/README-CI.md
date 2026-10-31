@@ -21,9 +21,9 @@ The job runs on `ubuntu-latest` and:
 From the repository root:
 
 ```bash
-COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/ci-up.sh
-COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/ci-test.sh
-COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/ci-down.sh
+COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-up.sh
+COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-test.sh
+COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-down.sh
 ```
 
 The CI scripts deliberately use a dedicated Compose project name (`crdb-ci`)
