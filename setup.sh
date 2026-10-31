@@ -203,7 +203,7 @@ build(){
     # Copy resources into the frontend package folder
     resources
     # Package the database image and its installer
-    database
+    # database
 }
 
 database(){
