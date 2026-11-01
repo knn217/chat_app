@@ -85,26 +85,6 @@ jobs:
           echo "node2_ip=${ips[db-node2]}" >> "$GITHUB_OUTPUT"
           echo "node3_ip=${ips[db-node3]}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Docker inside guests
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          for node in db-node1 db-node2 db-node3; do
-            echo "Installing Docker on $node..."
-
-            sudo multipass exec "$node" -- sudo bash -lc '
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                docker.io \
-                docker-compose-v2
-
-              systemctl enable --now docker
-              docker version
-              docker compose version
-            '
-          done
-
       - name: Generate certificates and deployment package
         env:
           NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
@@ -172,31 +152,7 @@ jobs:
               "$RUNNER_TEMP/$node.tar.gz" \
               "$vm:/home/ubuntu/deploy.tar.gz"
 
-            sudo multipass exec "$vm" -- sudo bash -lc "
-              set -euo pipefail
-
-              mkdir -p /opt/crdb-deploy /opt/database
-
-              tar -xzf /home/ubuntu/deploy.tar.gz \
-                -C /opt/crdb-deploy
-
-              tar -xzf \
-                /opt/crdb-deploy/cockroach-cluster-package.tar.gz \
-                -C /opt
-
-              mkdir -p /opt/database/certs/$node
-              mkdir -p /opt/database/data/$node
-
-              cp -a /opt/crdb-deploy/node-certs/. \
-                /opt/database/certs/$node/
-
-              cp /opt/crdb-deploy/.env /opt/database/.env
-
-              cd /opt/database
-
-              docker compose -f docker-compose.cloud.yml up -d
-              docker ps
-            "
+            sudo multipass exec "$vm" -- sudo bash -s -- "$node" < .github/scripts/compose_db_cloud.sh
           }
 
           deploy_node db-node1 node1 "$NODE1_IP"

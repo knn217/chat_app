@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-local}"
 IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
