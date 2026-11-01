@@ -264,7 +264,7 @@ run(){
 
         # Run tests
         schemathesis run "./openapi.json" \
-            --url=http://localhost:8080
+            --url=http://localhost:8090
             # --exclude-checks unsupported_method
 
         # Stop the process after the step is complete

@@ -27,7 +27,7 @@ async fn main() -> std::io::Result<()> {
 
     // let router = router.merge(SwaggerUi::new("/swagger-ui").url("/apidoc/openapi.json", _api));
 
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 8080)).await?;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 8090)).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
