@@ -11,6 +11,8 @@ tar -czf "$OUT_DIR/${ARCHIVE_NAME}.tar.gz" -C "$(dirname "$ROOT")" \
   --exclude="$BASE/.env" \
   --exclude="$BASE/certs/*" --exclude="$BASE/secrets/*" --exclude="$BASE/data/*" \
   --exclude="$BASE/dist" \
+  --exclude="$BASE/migrations" \
+  --exclude="$BASE/bootstrap" \
   "$BASE"
 echo "Created: $OUT_DIR/${ARCHIVE_NAME}.tar.gz"
 echo "Generated certs, CA private key, and database data are intentionally not packaged."

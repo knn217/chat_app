@@ -22,6 +22,8 @@ From the repository root:
 
 ```bash
 COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-up.sh
+COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/install-flyway.sh
+COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/migrate.sh
 COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-test.sh
 COMPOSE_PROJECT_NAME=crdb-ci bash database/scripts/local-down.sh
 ```

@@ -39,6 +39,16 @@ docker run --rm --user "$(id -u):$(id -g)" \
   --certs-dir=/work/certs/client --ca-key=/work/secrets/ca.key
 chmod 600 "$ROOT/certs/client/client.root.key"
 
+openssl pkcs8 \
+  -topk8 \
+  -inform PEM \
+  -outform PEM \
+  -in "$ROOT/certs/client/client.root.key" \
+  -out "$ROOT/certs/client/client.root.pem" \
+  -nocrypt
+
+chmod 600 "$ROOT/certs/client/client.root.pem"
+
 cat <<MSG
 Certificates generated.
 - Keep secrets/ca.key offline and tightly restricted; never copy it to database hosts.
