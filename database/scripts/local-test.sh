@@ -32,12 +32,31 @@ node_status=""
 
 for attempt in $(seq 1 60); do
   if node_status="$(run_cli node status \
+    --ranges \
     --certs-dir=/cockroach-certs \
     --host="$COCKROACH_HOST" \
     --format=tsv 2>&1)"; then
 
     node_count="$(printf '%s\n' "$node_status" |
-      awk -F '\t' '$1 ~ /^[[:space:]]*[0-9]+[[:space:]]*$/ { n++ } END { print n+0 }')"
+      awk -F '\t' '
+        NR == 1 {
+          for (i = 1; i <= NF; i++) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+            if ($i == "id") id_col = i
+            if ($i == "is_live") live_col = i
+          }
+          next
+        }
+        id_col && live_col &&
+        $id_col ~ /^[[:space:]]*[0-9]+[[:space:]]*$/ {
+          live = $live_col
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", live)
+          if (tolower(live) == "true") n++
+        }
+        END {
+          if (!id_col || !live_col) exit 2
+          print n+0
+        }')"
 
     if [[ "$node_count" -eq 3 ]]; then
       break
@@ -63,6 +82,7 @@ CREATE TABLE IF NOT EXISTS ci_test.workflow_test.records (
   payload STRING NOT NULL,
   amount INT NOT NULL
 );
+DELETE FROM ci_test.workflow_test.records;
 UPSERT INTO ci_test.workflow_test.records (id, payload, amount) VALUES
   (1, 'alpha', 10),
   (2, 'bravo', 20),
