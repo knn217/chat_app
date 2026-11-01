@@ -203,36 +203,6 @@ build(){
     # Copy resources into the frontend package folder
     resources
     # Package the database image and its installer
-    # database
-}
-
-database(){
-    local DB_SRC="$SCRIPTDIR/database"
-    local PKG_PATH="$SCRIPTDIR/target/$BUILD_PROFILE/package/database"
-    local IMAGE="chat-db:local"
-    # Base image tag lives in .env.example, single source of truth
-    local DB_VERSION=$(grep -E '^COCKROACH_VERSION=' "$DB_SRC/.env.example" | cut -d= -f2-)
-
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "docker is required to package the database" >&2
-        exit 1
-    fi
-
-    # Build the image (setup scripts and SQL are baked into it)
-    docker build -t "$IMAGE" --build-arg COCKROACH_VERSION="$DB_VERSION" "$DB_SRC" || exit 1
-
-    # Recreate package path
-    rm -rf "$PKG_PATH"
-    mkdir -p "$PKG_PATH/scripts"
-
-    # Export the image so it can be installed offline with `docker load`
-    docker save "$IMAGE" -o "$PKG_PATH/chat-db.tar" || exit 1
-    gzip -f "$PKG_PATH/chat-db.tar" || exit 1
-
-    # Only the host-side files are needed next to the image
-    cp "$DB_SRC/docker-compose.yml" "$DB_SRC/.env.example" "$DB_SRC/README.md" "$DB_SRC/install.sh" "$DB_SRC/uninstall.sh" "$PKG_PATH/" || exit 1
-    cp "$DB_SRC/scripts/backup.sh" "$DB_SRC/scripts/restore.sh" "$PKG_PATH/scripts/" || exit 1
-    chmod +x "$PKG_PATH/install.sh" "$PKG_PATH/uninstall.sh" "$PKG_PATH"/scripts/*.sh
 }
 
 resources(){
@@ -266,11 +236,19 @@ run(){
 
     local TARGET_PATH="$SCRIPTDIR/target/$RUN_PROFILE"
     local PACKAGE_PATH="$TARGET_PATH/package"
-    # Setup database
-    # docker compose cp cockroach:/certs/ca.crt ./ca.crt
-    # docker compose up -d --build
-    $TARGET_PATH/package/database/install.sh
-    export DATABASE_URL="postgresql://root@localhost:26257/chat_db?sslmode=disable"
+
+    # local database up
+    local DATABASE="$SCRIPTDIR/database"
+    bash "$DATABASE/scripts/local-up.sh"
+    bash "$DATABASE/scripts/install-flyway.sh"
+    bash "$DATABASE/scripts/migrate.sh"
+
+    local CLIENT_CERTS="$DATABASE/certs/client"
+    local JDBC_OPTIONS="sslmode=verify-full\
+&sslrootcert=${CLIENT_CERTS}/ca.crt\
+&sslcert=${CLIENT_CERTS}/client.root.crt\
+&sslkey=${CLIENT_CERTS}/client.root.pem"
+    export DATABASE_URL="postgresql://root@localhost:26257/chat_db?${JDBC_OPTIONS}"
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs
 
@@ -297,13 +275,13 @@ run(){
         wait $PID 2>/dev/null
         echo "Process stopped."
 
-        $TARGET_PATH/package/database/uninstall.sh
+        bash "$DATABASE/scripts/local-down.sh"
         return
     fi
 
     if [ "$PROFILING" == "false" ]; then
         RUST_BACKTRACE=full "$PACKAGE_PATH/backend/backend" || {
-            $TARGET_PATH/package/database/uninstall.sh
+            bash "$DATABASE/scripts/local-down.sh"
             exit 1
         }
     else
@@ -334,7 +312,7 @@ run(){
         echo "Report written at: $PROFILING_PATH/report.txt"
     fi
 
-    $TARGET_PATH/package/database/uninstall.sh
+    bash "$DATABASE/scripts/local-down.sh"
 
 }
 

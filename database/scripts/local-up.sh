@@ -11,6 +11,11 @@ COMPOSE=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$ROOT/docker-compose.yml"
 command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
 docker info >/dev/null
 
+# Remove all the certs and secrets
+rm -rf "$ROOT/certs"
+rm -rf "$ROOT/secrets"
+echo "Removed all certs and secrets from last session."
+
 if [[ -e "$ROOT/secrets/ca.key" ]]; then
   echo "Refusing to reuse an existing CA key in CI. Use a clean runner/worktree." >&2
   exit 1
