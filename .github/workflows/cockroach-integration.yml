@@ -27,6 +27,12 @@ jobs:
         working-directory: database
         run: bash scripts/local-up.sh
 
+      - name: Perform migration on local DB cluster
+        working-directory: database
+        run: |
+          bash scripts/install-flyway.sh
+          bash scripts/migrate.sh
+
       - name: Verify cluster and SQL read/write
         working-directory: database
         run: bash scripts/local-test.sh

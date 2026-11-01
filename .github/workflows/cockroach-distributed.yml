@@ -256,12 +256,22 @@ jobs:
             /tmp/crdb-client \
             /home/ubuntu/client-certs.tar.gz
 
+      - name: Perform migration on CockroachDB cluster
+        env:
+          COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
+          COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+        working-directory: database
+        run: |
+          bash scripts/install-flyway.sh
+          bash scripts/migrate.sh
+
       - name: Test distributed CockroachDB cluster
+        working-directory: database
         env:
           COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
           COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
         run: |
-          bash database/scripts/local-test.sh
+          bash scripts/local-test.sh
 
       - name: Collect diagnostics
         if: always()
