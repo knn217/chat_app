@@ -1,3 +1,4 @@
+use std::env;
 use std::net::Ipv4Addr;
 
 use tokio::net::TcpListener;
@@ -11,7 +12,7 @@ pub mod db;
 pub mod server;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
@@ -27,7 +28,8 @@ async fn main() -> std::io::Result<()> {
 
     // let router = router.merge(SwaggerUi::new("/swagger-ui").url("/apidoc/openapi.json", _api));
 
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 8090)).await?;
+    let port: u16 = env::var("CHAT_BE_PORT")?.parse()?;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await?;

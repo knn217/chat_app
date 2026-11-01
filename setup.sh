@@ -249,6 +249,7 @@ run(){
 &sslcert=${CLIENT_CERTS}/client.root.crt\
 &sslkey=${CLIENT_CERTS}/client.root.pem"
     export DATABASE_URL="postgresql://root@localhost:26257/chat_db?${JDBC_OPTIONS}"
+    export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs
 
@@ -264,7 +265,7 @@ run(){
 
         # Run tests
         schemathesis run "./openapi.json" \
-            --url=http://localhost:8090
+            --url=http://localhost:$CHAT_BE_PORT
             # --exclude-checks unsupported_method
 
         # Stop the process after the step is complete
