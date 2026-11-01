@@ -34,19 +34,24 @@ impl Database {
     }
 
     /// Connects using an explicit connection URL.
-    ///
-    /// The connection is driven by a background task spawned on the current tokio runtime,
-    /// so call this from inside that runtime (e.g. from `main` under `#[actix_web::main]`).
     pub async fn connect(url: &str) -> Result<Self, DbError> {
-        let tls = tls::connector()?;
-        let (client, connection) = tokio_postgres::connect(url, tls)
+        println!("url: {}", url);
+
+        // This returns the parsed Config (with file paths stripped) and the configured OpenSSL connector
+        let (config, tls) = tls::connector_from_url(url)?;
+
+        // Call .connect() directly on the config object
+        let (client, connection) = config
+            .connect(tls)
             .await
             .map_err(|e| DbError::Connection(e.to_string()))?;
+
         tokio::spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("database connection error: {e}");
             }
         });
+
         Ok(Self { client })
     }
 }

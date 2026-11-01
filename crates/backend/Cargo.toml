@@ -28,8 +28,12 @@ utoipa-swagger-ui = { version = "10", features = ["axum"] }
 openssl = { version = "0.10.41" }
 postgres-openssl = { version = "0.5.0" }
 chrono = { version = "0.4.22" }
-tokio-postgres = { version = "0.7.18" }
 tokio = { version = "1.54.1", features = ["full"] }
+tokio-postgres = { version = "0.7.18" }
+tokio-postgres-rustls = "0.14.0"
+rustls = "0.23"
+rustls-pemfile = "2.1"
+url = "2"
 tracing-subscriber = { version = "0.3.23" }
 tracing = { version = "0.1.44" }
 
