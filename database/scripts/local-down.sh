@@ -5,56 +5,50 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-crdb-ci}"
-
-COMPOSE=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$ROOT/docker-compose.yml" --project-directory "$ROOT")
-
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-crdb-ci}"
+COMPOSE_FILE="$ROOT/docker-compose.cloud.yml"
+COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
+NETWORK="crdb-cluster"
 GRACE_SECONDS="${CI_STOP_TIMEOUT:-10}"
-LOG_INTERVAL=3
 
-echo "Stopping CockroachDB containers..."
+JOIN_ADDRS="node1:26257,node2:26257,node3:26257"
 
-containers=("${COMPOSE_PROJECT_NAME}-node1-1"
-            "${COMPOSE_PROJECT_NAME}-node2-1"
-            "${COMPOSE_PROJECT_NAME}-node3-1")
+# Stop and remove one node's Compose project.
+compose_node() {
+    local node="$1"
+    local sql_port="$2"
+    local http_port="$3"
+    shift 3
 
-for container in "${containers[@]}"; do
-  if ! docker inspect "$container" >/dev/null 2>&1; then
-    continue
-  fi
+    env \
+        NODE_NAME="$node" \
+        NODE_ADVERTISE_ADDR="$node" \
+        NODE_SQL_PORT="$sql_port" \
+        NODE_HTTP_PORT="$http_port" \
+        JOIN_ADDRS="$JOIN_ADDRS" \
+        COCKROACH_IMAGE="$COCKROACH_IMAGE" \
+        docker compose \
+            -p "${COMPOSE_PROJECT_NAME}-${node}" \
+            -f "$COMPOSE_FILE" \
+            --project-directory "$ROOT" \
+            "$@"
+}
 
-  if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != "true" ]]; then
-    continue
-  fi
+echo "Stopping CockroachDB nodes..."
 
-  echo "Requesting graceful shutdown: $container"
-  docker stop --time "$GRACE_SECONDS" "$container" >/dev/null &
-  stop_pid=$!
+compose_node node1 26257 8080 \
+    down --volumes --remove-orphans --timeout "$GRACE_SECONDS"
 
-  elapsed=0
+compose_node node2 26258 8081 \
+    down --volumes --remove-orphans --timeout "$GRACE_SECONDS"
 
-  while kill -0 "$stop_pid" 2>/dev/null && (( elapsed < GRACE_SECONDS )); do
-    sleep "$LOG_INTERVAL"
-    elapsed=$((elapsed + LOG_INTERVAL))
+compose_node node3 26259 8082 \
+    down --volumes --remove-orphans --timeout "$GRACE_SECONDS"
 
-    if kill -0 "$stop_pid" 2>/dev/null; then
-      echo "Still waiting for $container (${elapsed}s elapsed)..."
-      docker logs --tail 15 "$container" 2>&1 || true
-    fi
-  done
+# Remove the shared external network after all node projects are down.
+if docker network inspect "$NETWORK" >/dev/null 2>&1; then
+    echo "Removing Docker network: $NETWORK"
+    docker network rm "$NETWORK"
+fi
 
-  if kill -0 "$stop_pid" 2>/dev/null; then
-    echo "Shutdown timed out for $container. Sending SIGKILL..."
-    docker kill "$container" >/dev/null 2>&1 || true
-  fi
-
-  wait "$stop_pid" 2>/dev/null || true
-done
-
-echo "Removing containers, networks, and volumes..."
-"${COMPOSE[@]}" down \
-  --volumes \
-  --remove-orphans \
-  --timeout 10
-
-echo "CockroachDB CI cluster stopped and cleaned up."
+echo "CockroachDB cluster stopped."

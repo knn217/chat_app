@@ -86,12 +86,6 @@ docker compose pull
 docker compose up -d
 ```
 
-Initialize the cluster **once**, after all three nodes are running:
-
-```bash
-./scripts/init-cluster.sh node1
-```
-
 Do not run `cockroach init` again on an already initialized cluster. Check containers and node membership:
 
 ```bash

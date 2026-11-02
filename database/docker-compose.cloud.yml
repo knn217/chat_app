@@ -12,15 +12,15 @@ services:
       - --http-addr=0.0.0.0:8080
       - --join=${JOIN_ADDRS:?Set JOIN_ADDRS}
     ports:
-      - "${NODE_SQL_PORT:-26257}:26257"
-      - "${NODE_HTTP_PORT:-8080}:8080"
+      - "${NODE_SQL_PORT:?Set NODE_SQL_PORT}:26257"
+      - "${NODE_HTTP_PORT:?Set NODE_HTTP_PORT}:8080"
     volumes:
       - ./certs/${NODE_NAME}:/cockroach/certs:ro
       - ./data/${NODE_NAME}:/cockroach/cockroach-data
     networks:
       cluster:
         aliases:
-          - ${NODE_NAME:?Set NODE_NAME}
+          - ${NODE_NAME}
     restart: unless-stopped
     stop_grace_period: 5m
 
