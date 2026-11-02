@@ -3,8 +3,10 @@ set -Eeuo pipefail
 
 NODE="$1"
 IP="$2"
-JOIN_ADDRS="$3"
-COCKROACH_IMAGE="$4"
+COCKROACH_IMAGE="$3"
+JOIN_ADDRS="$4"
+NODE_SQL_PORT="$5"
+NODE_HTTP_PORT="$6"
 
 # Install docker
 apt-get update
@@ -34,8 +36,15 @@ cd /opt/database
 # Export env var before composing image
 export NODE_NAME=$NODE
 export NODE_ADVERTISE_ADDR=$IP
-export JOIN_ADDRS=$JOIN_ADDRS
 export COCKROACH_IMAGE=$COCKROACH_IMAGE
+export JOIN_ADDRS=$JOIN_ADDRS
+export NODE_SQL_PORT=$NODE_SQL_PORT
+export NODE_HTTP_PORT=$NODE_HTTP_PORT
+
+# Create external network for docker image 1st
+if ! docker network inspect crdb-cluster >/dev/null 2>&1; then
+    docker network create crdb-cluster
+fi
 
 # Compose the image
 docker compose -f docker-compose.cloud.yml up -d

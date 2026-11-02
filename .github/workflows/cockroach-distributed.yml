@@ -129,6 +129,8 @@ jobs:
             local node="$2"
             local ip="$3"
             local bundle="$RUNNER_TEMP/$node"
+            local host_crdb_SQL_port="26257"
+            local host_crdb_HTTP_port="8080"
 
             echo "=== Preparing deployment for $node ($ip) ==="
 
@@ -150,8 +152,10 @@ jobs:
               sudo bash -s -- \
                 "$node" \
                 "$ip" \
-                "$JOIN_ADDRS" \
                 "$COCKROACH_IMAGE" \
+                "$JOIN_ADDRS" \
+                "$host_crdb_SQL_port" \
+                "$host_crdb_HTTP_port" \
                 < .github/scripts/compose_db_cloud.sh
           }
 

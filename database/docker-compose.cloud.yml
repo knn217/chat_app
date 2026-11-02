@@ -1,11 +1,8 @@
-# One CockroachDB node per Ubuntu host. Use network_mode: host so advertised
-# addresses are the host's stable private DNS/IP, not a container bridge IP.
 services:
   cockroach:
     image: ${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}
     container_name: cockroach-${NODE_NAME:?Set NODE_NAME}
     hostname: ${NODE_NAME:?Set NODE_NAME}
-    network_mode: host
     command:
       - start
       - --certs-dir=/cockroach/certs
@@ -14,8 +11,20 @@ services:
       - --advertise-addr=${NODE_ADVERTISE_ADDR:?Set NODE_ADVERTISE_ADDR}:26257
       - --http-addr=0.0.0.0:8080
       - --join=${JOIN_ADDRS:?Set JOIN_ADDRS}
+    ports:
+      - "${NODE_SQL_PORT:-26257}:26257"
+      - "${NODE_HTTP_PORT:-8080}:8080"
     volumes:
       - ./certs/${NODE_NAME}:/cockroach/certs:ro
       - ./data/${NODE_NAME}:/cockroach/cockroach-data
+    networks:
+      cluster:
+        aliases:
+          - ${NODE_NAME:?Set NODE_NAME}
     restart: unless-stopped
     stop_grace_period: 5m
+
+networks:
+  cluster:
+    name: crdb-cluster
+    external: true
