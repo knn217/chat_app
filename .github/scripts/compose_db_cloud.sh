@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 NODE="$1"
+IP="$2"
+JOIN_ADDRS="$3"
+COCKROACH_IMAGE="$4"
 
 # Install docker
 apt-get update
@@ -26,8 +29,14 @@ mkdir -p /opt/database/certs/$NODE
 mkdir -p /opt/database/data/$NODE
 cp -a /opt/crdb-deploy/node-certs/. \
   /opt/database/certs/$NODE/
-cp /opt/crdb-deploy/.env /opt/database/.env
+# cp /opt/crdb-deploy/.env /opt/database/.env
 cd /opt/database
+
+# Export env var before composing image
+export NODE_NAME=$NODE
+export NODE_ADVERTISE_ADDR=$IP
+export JOIN_ADDRS=$JOIN_ADDRS
+export COCKROACH_IMAGE=$COCKROACH_IMAGE
 
 # Compose the image
 docker compose -f docker-compose.cloud.yml up -d

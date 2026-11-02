@@ -138,13 +138,6 @@ jobs:
             cp "$PACKAGE" "$bundle/cockroach-cluster-package.tar.gz"
             cp -a "database/certs/$node/." "$bundle/node-certs/"
 
-            cat > "$bundle/.env" <<EOF
-          NODE_NAME=$node
-          NODE_ADVERTISE_ADDR=$ip
-          JOIN_ADDRS=$JOIN_ADDRS
-          COCKROACH_IMAGE=$COCKROACH_IMAGE
-          EOF
-
             tar -czf "$RUNNER_TEMP/$node.tar.gz" \
               -C "$bundle" .
 
@@ -152,7 +145,13 @@ jobs:
               "$RUNNER_TEMP/$node.tar.gz" \
               "$vm:/home/ubuntu/deploy.tar.gz"
 
-            sudo multipass exec "$vm" -- sudo bash -s -- "$node" < .github/scripts/compose_db_cloud.sh
+            sudo multipass exec "$vm" -- \
+              sudo bash -s -- \
+                "$node" \
+                "$ip" \
+                "$JOIN_ADDRS" \
+                "$COCKROACH_IMAGE" \
+                < .github/scripts/compose_db_cloud.sh
           }
 
           deploy_node db-node1 node1 "$NODE1_IP"
