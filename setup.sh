@@ -248,7 +248,8 @@ run(){
 &sslrootcert=${CLIENT_CERTS}/ca.crt\
 &sslcert=${CLIENT_CERTS}/client.root.crt\
 &sslkey=${CLIENT_CERTS}/client.root.pem"
-    export DATABASE_URL="postgresql://root@localhost:26257/chat_db?${JDBC_OPTIONS}"
+    # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
+    export DATABASE_URL="postgresql://root@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs

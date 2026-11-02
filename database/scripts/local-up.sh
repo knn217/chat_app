@@ -22,7 +22,11 @@ if [[ -e "$ROOT/secrets/ca.key" ]]; then
 fi
 
 # Use the exact certificate-generation path documented for local development.
-"$ROOT/scripts/generate-certs.sh" local
+bash "$ROOT/scripts/generate-ca.sh" "$ROOT"
+bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node1 node1 127.0.0.1
+bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node2 node2 127.0.0.1
+bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node3 node3 127.0.0.1
+bash "$ROOT/scripts/generate-cert-client.sh" "$ROOT" root
 
 # Start all three nodes on the Compose bridge network.
 "${COMPOSE[@]}" pull
