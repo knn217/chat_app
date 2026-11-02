@@ -135,6 +135,7 @@ jobs:
             rm -rf "$bundle"
             mkdir -p "$bundle/node-certs"
 
+            # All nodes' packages contain the same cockroach-cluster-package.tar.gz, but a different cert tar ball
             cp "$PACKAGE" "$bundle/cockroach-cluster-package.tar.gz"
             cp -a "database/certs/$node/." "$bundle/node-certs/"
 
