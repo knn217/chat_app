@@ -255,7 +255,7 @@ run(){
 
     if [ "$TEST" == "true" ]; then
         # Run backend in the background and save its PID
-        $PACKAGE_PATH/backend/backend &
+        (RUST_BACKTRACE=full $PACKAGE_PATH/backend/backend) &
         PID=$!
         echo "Started BE in background process with PID: $PID"
 
