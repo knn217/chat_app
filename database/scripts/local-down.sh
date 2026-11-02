@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-crdb-ci}"
-COMPOSE_FILE="$ROOT/docker-compose.cloud.yml"
+COMPOSE_FILE="$ROOT/docker-compose.yml"
 COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
 NETWORK="crdb-cluster"
 GRACE_SECONDS="${CI_STOP_TIMEOUT:-10}"

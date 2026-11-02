@@ -114,7 +114,7 @@ For an application, connect to one or more SQL endpoints using TLS and the clien
 
 ## 5. Cloud deployment: three Ubuntu VMs
 
-This mode runs **one node per VM**. Do not use the local `docker-compose.yml` for multiple cloud hosts; a Docker bridge network does not span hosts.
+This mode runs **one node per VM**. Run `docker-compose.yml` multiple times for multiple cloud hosts.
 
 ### 5.1 Prepare networking and files
 
@@ -130,7 +130,7 @@ Extract the same package on each VM, copy the correct per-node certificate direc
 mkdir -p data/node1
 ```
 
-Replace `node1` with the VM's configured node name. Copy `docker-compose.cloud.yml`, `scripts/`, and the required certs to every VM. The CA private key must not be present on the VMs.
+Replace `node1` with the VM's configured node name. Copy `docker-compose.yml`, `scripts/`, and the required certs to every VM. The CA private key must not be present on the VMs.
 
 ### 5.2 Start node1
 
@@ -141,7 +141,7 @@ export NODE_NAME=node1
 export NODE_ADVERTISE_ADDR=db-1.internal.example
 export JOIN_ADDRS=db-1.internal.example:26257,db-2.internal.example:26257,db-3.internal.example:26257
 export COCKROACH_IMAGE=cockroachdb/cockroach:v26.2.2
-docker compose -f docker-compose.cloud.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 ### 5.3 Start node2 and node3
@@ -153,7 +153,7 @@ export NODE_NAME=node2
 export NODE_ADVERTISE_ADDR=db-2.internal.example
 export JOIN_ADDRS=db-1.internal.example:26257,db-2.internal.example:26257,db-3.internal.example:26257
 export COCKROACH_IMAGE=cockroachdb/cockroach:v26.2.2
-docker compose -f docker-compose.cloud.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 Repeat for node3. The node certificate directory mounted at `./certs/${NODE_NAME}` must match that node's name and advertise DNS/IP SANs.
@@ -212,8 +212,8 @@ docker compose start node3
 On the target VM:
 
 ```bash
-docker compose -f docker-compose.cloud.yml stop -t 300 cockroach
-docker compose -f docker-compose.cloud.yml start cockroach
+docker compose -f docker-compose.yml stop -t 300 cockroach
+docker compose -f docker-compose.yml start cockroach
 ```
 
 The data volume/directory and node identity are preserved. A normal restart is not a node replacement; do not delete its data.
@@ -222,21 +222,11 @@ The data volume/directory and node identity are preserved. A normal restart is n
 
 CockroachDB automatically distributes ranges and replicas according to its replication/placement settings. Adding a node does not require creating tables or manually sharding data. This is distributed SQL with automatic range splitting, replication, and rebalancing; it is not application-managed hash sharding.
 
-**Local development (node4):**
-
-`config/nodes.local` already includes node4. Generate certs before first start, then:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.extra-node.yml up -d node4
-```
-
-The extra node joins via node1-node3. Verify using `./scripts/status.sh` or `cockroach node status` inside node1. If certs were already generated before node4 was added to the nodes file, generate a node4 certificate separately with the same CA (do not regenerate the CA); use the documented `cockroach cert create-node` command with `secrets/ca.key` on the secure admin machine.
-
 **Cloud:**
 
 1. Add the new node's name, stable private DNS name, and private IP to the admin-side node inventory; issue its node certificate using the existing CA key.
 2. Distribute only its node certificate directory to the new VM. Prepare the VM, Docker, firewall, persistent disk, and `data/<new-node>` directory.
-3. Start `docker-compose.cloud.yml` on the new VM with its own `NODE_NAME` and `NODE_ADVERTISE_ADDR`. Use the existing healthy node addresses in `JOIN_ADDRS` (the original three seed addresses are fine while reachable).
+3. Start `docker-compose.yml` on the new VM with its own `NODE_NAME` and `NODE_ADVERTISE_ADDR`. Use the existing healthy node addresses in `JOIN_ADDRS` (the original three seed addresses are fine while reachable).
 4. Do **not** run `cockroach init` on the new node. Verify that it appears in `node status` and wait for rebalancing to settle.
 
 ### Decommission and remove a node
@@ -302,10 +292,10 @@ docker compose stop -t 300
 Run on every VM:
 
 ```bash
-docker compose -f docker-compose.cloud.yml stop -t 300 cockroach
+docker compose -f docker-compose.yml stop -t 300 cockroach
 ```
 
-To restart, use `docker compose start` locally or `docker compose -f docker-compose.cloud.yml start cockroach` on each VM. Preserve all data directories and certificates. Do not run `init` again.
+To restart, use `docker compose start` locally or `docker compose -f docker-compose.yml start cockroach` on each VM. Preserve all data directories and certificates. Do not run `init` again.
 
 ### Destroy a local development cluster (irreversible)
 
@@ -313,8 +303,6 @@ This removes containers and named data volumes. It is not a normal shutdown.
 
 ```bash
 docker compose down -v
-# If the optional node4 was used:
-docker compose -f docker-compose.yml -f docker-compose.extra-node.yml down -v
 ```
 
 The generated certs and CA key remain on disk unless you explicitly delete them. Never run destructive volume commands on a production host as a cleanup shortcut.

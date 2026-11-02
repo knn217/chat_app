@@ -8,7 +8,7 @@ cd "$ROOT"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-crdb-ci}"
 export COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
 
-COMPOSE_FILE="$ROOT/docker-compose.cloud.yml"
+COMPOSE_FILE="$ROOT/docker-compose.yml"
 NETWORK="crdb-cluster"
 CLIENT_CERTS="$ROOT/certs/client"
 

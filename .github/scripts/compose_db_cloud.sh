@@ -47,5 +47,5 @@ if ! docker network inspect crdb-cluster >/dev/null 2>&1; then
 fi
 
 # Compose the image
-docker compose -f docker-compose.cloud.yml up -d
+docker compose -f docker-compose.yml up -d
 docker ps
