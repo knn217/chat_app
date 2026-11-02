@@ -93,18 +93,12 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          cat > "$RUNNER_TEMP/nodes.cloud" <<EOF
-          node1 node1 $NODE1_IP
-          node2 node2 $NODE2_IP
-          node3 node3 $NODE3_IP
-          EOF
-
-          echo "=== Nodes configuration ==="
-          cat "$RUNNER_TEMP/nodes.cloud"
-
           echo "=== Generate certificates ==="
-          bash database/scripts/generate-certs.sh \
-            cloud "$RUNNER_TEMP/nodes.cloud"
+          bash database/scripts/generate-ca.sh "database"
+          bash database/scripts/generate-cert-node.sh "database" node1 node1 $NODE1_IP
+          bash database/scripts/generate-cert-node.sh "database" node2 node2 $NODE2_IP
+          bash database/scripts/generate-cert-node.sh "database" node3 node3 $NODE3_IP
+          bash database/scripts/generate-cert-client.sh "database" root
 
           echo "=== Package deployment files ==="
           mkdir -p "$RUNNER_TEMP/package"

@@ -25,11 +25,9 @@ echo "Removed certificates and secrets from last session."
 
 # Generate common CA and certificates.
 bash "$ROOT/scripts/generate-ca.sh" "$ROOT"
-
 bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node1 node1 127.0.0.1
 bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node2 node2 127.0.0.1
 bash "$ROOT/scripts/generate-cert-node.sh" "$ROOT" node3 node3 127.0.0.1
-
 bash "$ROOT/scripts/generate-cert-client.sh" "$ROOT" root
 
 # Ensure the shared Docker network exists.
