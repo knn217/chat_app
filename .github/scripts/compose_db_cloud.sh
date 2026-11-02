@@ -20,11 +20,15 @@ tar -xzf /home/ubuntu/deploy.tar.gz \
 tar -xzf \
   /opt/crdb-deploy/cockroach-cluster-package.tar.gz \
   -C /opt
+
+# Create distinct cert and data path for each node
 mkdir -p /opt/database/certs/$NODE
 mkdir -p /opt/database/data/$NODE
 cp -a /opt/crdb-deploy/node-certs/. \
   /opt/database/certs/$NODE/
 cp /opt/crdb-deploy/.env /opt/database/.env
 cd /opt/database
+
+# Compose the image
 docker compose -f docker-compose.cloud.yml up -d
 docker ps
