@@ -1,4 +1,3 @@
-.env
 certs/**
 !certs/.gitkeep
 secrets/**

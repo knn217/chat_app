@@ -9,7 +9,6 @@ mkdir -p "$OUT_DIR"
 # Deliberately exclude credentials, generated certs, data, local env, and old archives.
 tar -czf "$OUT_DIR/${ARCHIVE_NAME}.tar.gz" -C "$(dirname "$ROOT")" \
   --exclude="$BASE/.git" \
-  --exclude="$BASE/.env" \
   --exclude="$BASE/certs/*" --exclude="$BASE/secrets/*" --exclude="$BASE/data/*" \
   --exclude="$BASE/dist" \
   --exclude="$BASE/migrations" \

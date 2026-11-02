@@ -30,7 +30,7 @@ chmod +x scripts/*.sh
 ./scripts/package.sh
 ```
 
-The archive is written to `dist/cockroach-cluster-package.tar.gz`. The packaging script includes the Compose files, scripts, sample configuration, and this README. It intentionally excludes `.env`, generated certificates, the CA private key, database data, and old archives.
+The archive is written to `dist/cockroach-cluster-package.tar.gz`. The packaging script includes the Compose files, scripts, sample configuration, and this README. It intentionally excludes generated certificates, the CA private key, database data, and old archives.
 
 On the target Ubuntu host, extract it:
 
@@ -38,10 +38,7 @@ On the target Ubuntu host, extract it:
 mkdir -p ~/services/cockroach
  tar -xzf cockroach-cluster-package.tar.gz -C ~/services/cockroach --strip-components=1
 cd ~/services/cockroach
-cp .env.example .env
 ```
-
-Edit `.env` to pin the CockroachDB image version you have validated. Do not casually change versions on a running cluster; plan and follow the official upgrade procedure.
 
 ## 3. Certificate model (required; no insecure mode)
 
@@ -84,7 +81,6 @@ The same CA signs all node and client certificates. If the CA key is lost, exist
 From the extracted package directory:
 
 ```bash
-cp .env.example .env
 ./scripts/generate-certs.sh local
 docker compose pull
 docker compose up -d

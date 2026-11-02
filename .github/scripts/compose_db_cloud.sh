@@ -29,7 +29,6 @@ mkdir -p /opt/database/certs/$NODE
 mkdir -p /opt/database/data/$NODE
 cp -a /opt/crdb-deploy/node-certs/. \
   /opt/database/certs/$NODE/
-# cp /opt/crdb-deploy/.env /opt/database/.env
 cd /opt/database
 
 # Export env var before composing image
