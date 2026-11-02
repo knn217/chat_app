@@ -87,7 +87,7 @@ echo "Checking whether CockroachDB is already initialized..."
 
 connected=false
 
-for attempt in $(seq 1 15); do
+for attempt in $(seq 1 5); do
   if sql_ready; then
     connected=true
     echo "Existing CockroachDB cluster is already ready. Skipping initialization."
