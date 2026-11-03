@@ -22,7 +22,7 @@ main() {
         exit 1
     }
 
-    local client_dir="$CERT_OUTPUT_DIR/certs/client"
+    local client_dir="$CERT_OUTPUT_DIR/certs/$username"
     local client_cert="$client_dir/client.$username.crt"
     local client_key="$client_dir/client.$username.key"
     local client_pem="$client_dir/client.$username.pem"
@@ -37,7 +37,7 @@ main() {
     echo "Generating client certificate: $username"
 
     cert_run cert create-client "$username" \
-        --certs-dir=/work/certs/client \
+        --certs-dir=/work/certs/$username \
         --ca-key=/work/secrets/ca.key
 
     [[ -f "$client_cert" && -f "$client_key" ]] || {

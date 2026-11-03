@@ -23,7 +23,7 @@ main() {
 }
 
 check_certificates() {
-    [[ -f "$ROOT/certs/client/client.root.crt" && -f "$ROOT/certs/client/client.root.key" ]] || {
+    [[ -f "$ROOT/certs/root/client.root.crt" && -f "$ROOT/certs/root/client.root.key" ]] || {
         echo "Client certificates are missing; generate them before running the tests." >&2
         exit 1
     }
@@ -34,7 +34,7 @@ check_certificates() {
 # remote guest IP while keeping the root client key on the runner.
 run_cli() {
     docker run --rm --network host \
-        -v "$ROOT/certs/client:/cockroach-certs:ro" \
+        -v "$ROOT/certs/root:/cockroach-certs:ro" \
         "$IMAGE" "$@"
 }
 

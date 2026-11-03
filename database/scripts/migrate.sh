@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 COCKROACH_HOST="${COCKROACH_HOST:-127.0.0.1:26257}"
 COCKROACH_DATABASE="${COCKROACH_DATABASE:-chat_db}"
-CLIENT_CERTS="${CLIENT_CERTS:-$ROOT/certs/client}"
+ROOT_CERTS="${ROOT_CERTS:-$ROOT/certs/root}"
 
-JDBC_OPTIONS="sslmode=verify-full&sslrootcert=${CLIENT_CERTS}/ca.crt&sslcert=${CLIENT_CERTS}/client.root.crt&sslkey=${CLIENT_CERTS}/client.root.pem"
+JDBC_OPTIONS="sslmode=verify-full&sslrootcert=${ROOT_CERTS}/ca.crt&sslcert=${ROOT_CERTS}/client.root.crt&sslkey=${ROOT_CERTS}/client.root.pem"
 
 main() {
     check_dependencies

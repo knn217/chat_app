@@ -47,7 +47,7 @@ The scripts call the `cockroach cert` utility inside the same pinned Docker imag
 - `secrets/ca.key`: private CA signing key. Keep offline or on a tightly controlled administration machine. **Never copy this file to database VMs or include it in the package archive.**
 - `certs/ca/ca.crt`: CA certificate.
 - `certs/<node>/`: that node's `ca.crt`, `node.crt`, and `node.key`.
-- `certs/client/`: root client certificate and key for administration/application bootstrap.
+- `certs/root/`: root client certificate and key for administration/application bootstrap.
 
 The generated node certificate is unique per node and includes its node name, DNS name, private IP, and loopback names. The CA key is only needed to issue certificates, not to run nodes.
 
@@ -71,7 +71,7 @@ This reads `config/nodes.local` (node1-node4). The first run creates the CA. The
 ./scripts/generate-certs.sh cloud config/nodes.cloud
 ```
 
-4. Securely distribute only the matching `certs/node1/` directory to node1, `certs/node2/` to node2, etc. Distribute `certs/client/` only to trusted clients. Do not distribute `secrets/ca.key` to database nodes.
+4. Securely distribute only the matching `certs/node1/` directory to node1, `certs/node2/` to node2, etc. Distribute `certs/root/` only to trusted clients. Do not distribute `secrets/ca.key` to database nodes.
 5. Set restrictive permissions on the private keys after copying (for example, `chmod 600 certs/*/*.key`). Keep a protected backup of the CA private key separately.
 
 The same CA signs all node and client certificates. If the CA key is lost, existing certificates continue to work, but you cannot issue replacements without a planned CA recovery/rotation process.

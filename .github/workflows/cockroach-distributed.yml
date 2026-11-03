@@ -180,17 +180,20 @@ jobs:
 
           echo "=== Prepare temporary root client certificate transfer ==="
 
-          tar -czf "$RUNNER_TEMP/client-certs.tar.gz" \
-            -C database/certs client
+          echo "Creating archive from:"
+          ls -lR database/certs/root
+          tar -czf "$RUNNER_TEMP/client-root-certs.tar.gz" \
+            -C database/certs root
 
           sudo multipass transfer \
-            "$RUNNER_TEMP/client-certs.tar.gz" \
-            db-node1:/home/ubuntu/client-certs.tar.gz
+            "$RUNNER_TEMP/client-root-certs.tar.gz" \
+            db-node1:/home/ubuntu/client-root-certs.tar.gz
 
           sudo multipass exec db-node1 -- sudo bash -lc '
             mkdir -p /tmp/crdb-client
-            tar -xzf /home/ubuntu/client-certs.tar.gz \
+            tar -xzf /home/ubuntu/client-root-certs.tar.gz \
               -C /tmp/crdb-client
+            ls -R /tmp/crdb-client
           '
 
           echo "=== Initialize cluster ==="
@@ -200,7 +203,7 @@ jobs:
           for attempt in $(seq 1 60); do
             if output=$(sudo multipass exec db-node1 -- sudo docker run --rm \
               --network host \
-              -v /tmp/crdb-client/client:/cockroach/certs:ro \
+              -v /tmp/crdb-client/root:/cockroach/certs:ro \
               "$COCKROACH_IMAGE" \
               init \
               --certs-dir=/cockroach/certs \
@@ -243,7 +246,7 @@ jobs:
           for attempt in $(seq 1 60); do
             if status=$(sudo multipass exec db-node1 -- sudo docker run --rm \
               --network host \
-              -v /tmp/crdb-client/client:/cockroach/certs:ro \
+              -v /tmp/crdb-client/root:/cockroach/certs:ro \
               "$COCKROACH_IMAGE" \
               node status \
               --certs-dir=/cockroach/certs \
@@ -278,7 +281,7 @@ jobs:
         run: |
           sudo multipass exec db-node1 -- sudo rm -rf \
             /tmp/crdb-client \
-            /home/ubuntu/client-certs.tar.gz || true
+            /home/ubuntu/client-root-certs.tar.gz || true
 
       # Generate the HAProxy configuration using node1 as the
       # discovery endpoint. The generated config must contain
@@ -306,7 +309,7 @@ jobs:
 
           docker run --rm \
             --network host \
-            -v "$GITHUB_WORKSPACE/database/certs/client:/cockroach/certs:ro" \
+            -v "$GITHUB_WORKSPACE/database/certs/root:/cockroach/certs:ro" \
             -v "$HAPROXY_DIR:/work" \
             -w /work \
             "$COCKROACH_IMAGE" \

@@ -10,7 +10,7 @@ export COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
 
 COMPOSE_FILE="$ROOT/docker-compose.yml"
 NETWORK="crdb-cluster"
-CLIENT_CERTS="$ROOT/certs/client"
+ROOT_CERTS="$ROOT/certs/root"
 
 command -v docker >/dev/null 2>&1 || {
   echo "docker is required" >&2
@@ -71,7 +71,7 @@ compose_node node3 26259 8082 up -d
 sql_ready() {
   docker run --rm \
     --network "$NETWORK" \
-    -v "$CLIENT_CERTS:/cockroach/certs:ro" \
+    -v "$ROOT_CERTS:/cockroach/certs:ro" \
     "$COCKROACH_IMAGE" \
     sql \
     --certs-dir=/cockroach/certs \
@@ -110,7 +110,7 @@ if [[ "$connected" != true ]]; then
       init_output="$(
         docker run --rm \
           --network "$NETWORK" \
-          -v "$CLIENT_CERTS:/cockroach/certs:ro" \
+          -v "$ROOT_CERTS:/cockroach/certs:ro" \
           "$COCKROACH_IMAGE" \
           init \
           --certs-dir=/cockroach/certs \

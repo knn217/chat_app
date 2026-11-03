@@ -243,11 +243,11 @@ run(){
     bash "$DATABASE/scripts/install-flyway.sh"
     bash "$DATABASE/scripts/migrate.sh"
 
-    local CLIENT_CERTS="$DATABASE/certs/client"
+    local ROOT_CERTS="$DATABASE/certs/root"
     local JDBC_OPTIONS="sslmode=verify-full\
-&sslrootcert=${CLIENT_CERTS}/ca.crt\
-&sslcert=${CLIENT_CERTS}/client.root.crt\
-&sslkey=${CLIENT_CERTS}/client.root.pem"
+&sslrootcert=${ROOT_CERTS}/ca.crt\
+&sslcert=${ROOT_CERTS}/client.root.crt\
+&sslkey=${ROOT_CERTS}/client.root.pem"
     # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
     export DATABASE_URL="postgresql://root@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
