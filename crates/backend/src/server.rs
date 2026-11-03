@@ -24,9 +24,6 @@ async fn router() -> std::io::Result<OpenApiRouter> {
     let db = Database::connect_from_env()
         .await
         .expect("failed to connect to database");
-    db.create_users_table()
-        .await
-        .expect("failed to create users table");
 
     Ok(OpenApiRouter::new()
         .nest("/me", OpenApiRouter::new().routes(routes!(auth::me)))

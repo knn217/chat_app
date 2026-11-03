@@ -112,9 +112,6 @@ async fn main() -> std::io::Result<()> {
     let db = Database::connect_from_env()
         .await
         .expect("failed to connect to database");
-    db.create_users_table()
-        .await
-        .expect("failed to create users table");
 
     let db = web::Data::new(db);
     HttpServer::new(move || {
@@ -160,7 +157,6 @@ All methods are `async` and take `&self`.
 |--------|---------|-------|
 | `Database::connect_from_env()` | `Database` | Reads `DATABASE_URL` |
 | `Database::connect(url)` | `Database` | Explicit URL |
-| `create_users_table()` | `()` | `CREATE TABLE IF NOT EXISTS` |
 | `insert_user(&NewUser)` | `User` | Hashes the password; `UsernameTaken` / `EmailTaken` on duplicates; `InvalidInput` on empty fields |
 | `authenticate_by_username(username, password)` | `Option<User>` | `None` for unknown user or wrong password |
 | `authenticate_by_email(email, password)` | `Option<User>` | Same, identified by email |

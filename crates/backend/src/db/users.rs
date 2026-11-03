@@ -150,31 +150,6 @@ async fn check_password(
 }
 
 impl Database {
-    pub async fn create_users_table(&self) -> Result<(), DbError> {
-        self.client
-            .batch_execute(
-                "CREATE TABLE IF NOT EXISTS users (
-                    user_id             UUID        NOT NULL DEFAULT gen_random_uuid(),
-                    username            STRING      NOT NULL,
-                    username_normalized STRING      NOT NULL,
-                    email               STRING      NOT NULL,
-                    email_normalized    STRING      NOT NULL,
-                    password_hash       STRING      NOT NULL,
-                    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now() ON UPDATE now(),
-
-                    CONSTRAINT users_pkey PRIMARY KEY (user_id),
-                    CONSTRAINT users_username_normalized_key UNIQUE (username_normalized),
-                    CONSTRAINT users_email_normalized_key UNIQUE (email_normalized),
-                    CONSTRAINT users_username_normalized_nonempty CHECK (username_normalized <> ''),
-                    CONSTRAINT users_email_normalized_nonempty CHECK (email_normalized <> ''),
-                    CONSTRAINT users_password_hash_nonempty CHECK (password_hash <> '')
-                )",
-            )
-            .await
-            .map_err(DbError::from_pg)
-    }
-
     /// Hashes the password, inserts the user and returns the stored row.
     /// Fails with `UsernameTaken` / `EmailTaken` on duplicates (compared normalized).
     pub async fn insert_user(&self, new: &NewUser) -> Result<User, DbError> {
