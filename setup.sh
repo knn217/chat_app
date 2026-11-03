@@ -242,14 +242,15 @@ run(){
     bash "$DATABASE/scripts/local-up.sh"
     bash "$DATABASE/scripts/install-flyway.sh"
     bash "$DATABASE/scripts/migrate.sh"
+    bash "$DATABASE/scripts/local-test.sh"
 
-    local ROOT_CERTS="$DATABASE/certs/root"
+    local ROOT_CERTS="$DATABASE/certs/user_be"
     local JDBC_OPTIONS="sslmode=verify-full\
 &sslrootcert=${ROOT_CERTS}/ca.crt\
-&sslcert=${ROOT_CERTS}/client.root.crt\
-&sslkey=${ROOT_CERTS}/client.root.pem"
+&sslcert=${ROOT_CERTS}/client.user_be.crt\
+&sslkey=${ROOT_CERTS}/client.user_be.pem"
     # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
-    export DATABASE_URL="postgresql://root@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
+    export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs

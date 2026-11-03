@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COCKROACH_HOST="${COCKROACH_HOST:-127.0.0.1:26257}"
 COCKROACH_DATABASE="${COCKROACH_DATABASE:-chat_db}"
 ROOT_CERTS="${ROOT_CERTS:-$ROOT/certs/root}"
-
+# Migration always use root cert, since many operations need root permission
 JDBC_OPTIONS="sslmode=verify-full&sslrootcert=${ROOT_CERTS}/ca.crt&sslcert=${ROOT_CERTS}/client.root.crt&sslkey=${ROOT_CERTS}/client.root.pem"
 
 main() {

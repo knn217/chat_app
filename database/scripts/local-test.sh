@@ -22,6 +22,7 @@ main() {
     echo "PASS: three-node membership, TLS SQL connection, schema/table creation, inserts, query assertion, cleanup, and application migration verification."
 }
 
+# This test needs to monitor cluster's status, which is a root operation, use root cert
 check_certificates() {
     [[ -f "$ROOT/certs/root/client.root.crt" && -f "$ROOT/certs/root/client.root.key" ]] || {
         echo "Client certificates are missing; generate them before running the tests." >&2

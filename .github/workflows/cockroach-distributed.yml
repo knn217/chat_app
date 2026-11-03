@@ -100,11 +100,12 @@ jobs:
           set -Eeuo pipefail
 
           echo "=== Generate certificates ==="
-          bash database/scripts/generate-ca.sh "database"
-          bash database/scripts/generate-cert-node.sh "database" node1 node1 "$NODE1_IP" "$LB_IP"
-          bash database/scripts/generate-cert-node.sh "database" node2 node2 "$NODE2_IP" "$LB_IP"
-          bash database/scripts/generate-cert-node.sh "database" node3 node3 "$NODE3_IP" "$LB_IP"
-          bash database/scripts/generate-cert-client.sh "database" root
+          bash database/scripts/generate-ca.sh "./database"
+          bash database/scripts/generate-cert-node.sh "./database" node1 node1 "$NODE1_IP" "$LB_IP"
+          bash database/scripts/generate-cert-node.sh "./database" node2 node2 "$NODE2_IP" "$LB_IP"
+          bash database/scripts/generate-cert-node.sh "./database" node3 node3 "$NODE3_IP" "$LB_IP"
+          bash database/scripts/generate-cert-client.sh "./database" root
+          bash database/scripts/generate-cert-client.sh "./database" user_be
 
           echo "=== Verify SAN for the nodes' certificates ==="
           for node in node1 node2 node3; do

@@ -119,6 +119,7 @@ fn from_row(row: &Row) -> Result<User, DbError> {
 
 /// Maps unique-constraint violations on insert to `UsernameTaken` / `EmailTaken`.
 fn map_insert_err(e: tokio_postgres::Error) -> DbError {
+    tracing::error!("tokio_postgres error: {:#?}", e);
     if e.code() == Some(&SqlState::UNIQUE_VIOLATION) {
         let db_err = e.as_db_error();
         let constraint = db_err.and_then(|d| d.constraint()).unwrap_or("");

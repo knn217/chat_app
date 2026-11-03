@@ -30,18 +30,19 @@ pub async fn register(
     new_user.validate().map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
-            format!("Invalid request body error: {}", e),
+            format!("Invalid request body error: {:#?}", e),
         )
     })?;
 
     // Insert to db
     let _user = db.insert_user(&new_user).await.map_err(|e| match e {
-        DbError::UsernameTaken | DbError::EmailTaken => {
-            (StatusCode::CONFLICT, format!("Failed DB insertion: {}", e))
-        }
+        DbError::UsernameTaken | DbError::EmailTaken => (
+            StatusCode::CONFLICT,
+            format!("Failed DB insertion: {:#?}", e),
+        ),
         _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed DB insertion: {}", e),
+            format!("Failed DB insertion: {:#?}", e),
         ),
     })?;
     // Response
