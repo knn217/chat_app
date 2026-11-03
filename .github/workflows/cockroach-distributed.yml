@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       keep_vms:
-        description: Keep Multipass VMs after the workflow (useful for debugging)
+        description: Skip VM cleanup before the GitHub runner is destroyed (debugging only)
         required: false
         type: boolean
         default: false
@@ -49,6 +49,10 @@ jobs:
 
           sudo multipass wait-ready
           sudo multipass version
+
+          if [[ ! -e /dev/kvm ]]; then
+            echo "Warning: /dev/kvm is unavailable; Multipass may run without hardware acceleration."
+          fi
 
       - name: Launch Ubuntu guests
         id: guests
@@ -95,9 +99,9 @@ jobs:
 
           echo "=== Generate certificates ==="
           bash database/scripts/generate-ca.sh "database"
-          bash database/scripts/generate-cert-node.sh "database" node1 node1 $NODE1_IP
-          bash database/scripts/generate-cert-node.sh "database" node2 node2 $NODE2_IP
-          bash database/scripts/generate-cert-node.sh "database" node3 node3 $NODE3_IP
+          bash database/scripts/generate-cert-node.sh "database" node1 node1 "$NODE1_IP"
+          bash database/scripts/generate-cert-node.sh "database" node2 node2 "$NODE2_IP"
+          bash database/scripts/generate-cert-node.sh "database" node3 node3 "$NODE3_IP"
           bash database/scripts/generate-cert-client.sh "database" root
 
           echo "=== Package deployment files ==="
@@ -131,7 +135,8 @@ jobs:
             rm -rf "$bundle"
             mkdir -p "$bundle/node-certs"
 
-            # All nodes' packages contain the same cockroach-cluster-package.tar.gz, but a different cert tar ball
+            # All nodes share the same deployment package,
+            # but each receives its own node certificate.
             cp "$PACKAGE" "$bundle/cockroach-cluster-package.tar.gz"
             cp -a "database/certs/$node/." "$bundle/node-certs/"
 
@@ -183,14 +188,23 @@ jobs:
           initialized=false
 
           for attempt in $(seq 1 60); do
-            if sudo multipass exec db-node1 -- sudo docker run --rm \
+            if output=$(sudo multipass exec db-node1 -- sudo docker run --rm \
               --network host \
               -v /tmp/crdb-client/client:/cockroach/certs:ro \
               "$COCKROACH_IMAGE" \
               init \
               --certs-dir=/cockroach/certs \
-              --host="$NODE1_IP:26257"; then
+              --host="$NODE1_IP:26257" 2>&1); then
 
+              echo "$output"
+              initialized=true
+              break
+            fi
+
+            echo "$output"
+
+            if grep -qi "cluster has already been initialized" <<< "$output"; then
+              echo "Cluster is already initialized."
               initialized=true
               break
             fi
@@ -204,11 +218,57 @@ jobs:
             exit 1
           fi
 
-          echo "=== Remove temporary client credentials from node1 ==="
+      - name: Verify all three CockroachDB nodes
+        env:
+          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
+          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+        run: |
+          set -Eeuo pipefail
 
+          echo "=== Waiting for all three nodes to join the cluster ==="
+
+          verified=false
+
+          for attempt in $(seq 1 60); do
+            if status=$(sudo multipass exec db-node1 -- sudo docker run --rm \
+              --network host \
+              -v /tmp/crdb-client/client:/cockroach/certs:ro \
+              "$COCKROACH_IMAGE" \
+              node status \
+              --certs-dir=/cockroach/certs \
+              --host="$NODE1_IP:26257" 2>&1); then
+
+              echo "$status"
+
+              if grep -Fq "$NODE1_IP:26257" <<< "$status" &&
+                 grep -Fq "$NODE2_IP:26257" <<< "$status" &&
+                 grep -Fq "$NODE3_IP:26257" <<< "$status"; then
+
+                verified=true
+                break
+              fi
+            else
+              echo "$status"
+            fi
+
+            echo "Not all three nodes are visible yet (attempt $attempt/60)."
+            sleep 5
+          done
+
+          if [[ "$verified" != true ]]; then
+            echo "Cluster verification failed: expected all three nodes." >&2
+            exit 1
+          fi
+
+          echo "All three nodes are registered in the cluster."
+
+      - name: Remove temporary client credentials
+        if: always()
+        run: |
           sudo multipass exec db-node1 -- sudo rm -rf \
             /tmp/crdb-client \
-            /home/ubuntu/client-certs.tar.gz
+            /home/ubuntu/client-certs.tar.gz || true
 
       - name: Perform migration on CockroachDB cluster
         env:
