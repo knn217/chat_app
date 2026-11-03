@@ -60,7 +60,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          for node in db-node1 db-node2 db-node3; do
+          for node in db-node1 db-node2 db-node3 db-lb; do
             echo "Launching $node..."
 
             sudo multipass launch 24.04 \
@@ -73,7 +73,7 @@ jobs:
 
           declare -A ips
 
-          for node in db-node1 db-node2 db-node3; do
+          for node in db-node1 db-node2 db-node3 db-lb; do
             ip=$(sudo multipass exec "$node" -- hostname -I | awk '{print $1}')
 
             if [[ -z "$ip" ]]; then
@@ -88,6 +88,7 @@ jobs:
           echo "node1_ip=${ips[db-node1]}" >> "$GITHUB_OUTPUT"
           echo "node2_ip=${ips[db-node2]}" >> "$GITHUB_OUTPUT"
           echo "node3_ip=${ips[db-node3]}" >> "$GITHUB_OUTPUT"
+          echo "lb_ip=${ips[db-lb]}" >> "$GITHUB_OUTPUT"
 
       - name: Generate certificates and deployment package
         env:
@@ -282,15 +283,17 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          echo "=== Install HAProxy ==="
+          echo "=== Install HAProxy on db-lb ==="
 
-          sudo apt-get update
-          sudo apt-get install -y haproxy
+          sudo multipass exec db-lb -- sudo apt-get update
+
+          sudo multipass exec db-lb -- \
+            sudo apt-get install -y haproxy
+
+          echo "=== Generate HAProxy configuration ==="
 
           HAPROXY_DIR="$RUNNER_TEMP/haproxy"
           mkdir -p "$HAPROXY_DIR"
-
-          echo "=== Generate HAProxy configuration ==="
 
           docker run --rm \
             --network host \
@@ -310,56 +313,49 @@ jobs:
             exit 1
           fi
 
-          echo "=== Verify all three backends are present ==="
+          echo "=== Verify all three backends ==="
 
           for ip in "$NODE1_IP" "$NODE2_IP" "$NODE3_IP"; do
-            if ! grep -Fq "$ip:26257" "$CONFIG"; then
-              echo "Missing CockroachDB backend: $ip:26257" >&2
-              cat "$CONFIG"
+            grep -Fq "$ip:26257" "$CONFIG" || {
+              echo "Missing backend: $ip:26257" >&2
               exit 1
-            fi
+            }
           done
 
-          echo "All three CockroachDB backends are present."
+          echo "=== Configure listener ==="
 
-          echo "=== Configure HAProxy listener ==="
-
-          # HAProxy listens only on the runner's loopback interface.
+          # Listen on all interfaces of db-lb.
           sed -i \
-            's|^[[:space:]]*bind[[:space:]]*:26257[[:space:]]*$|  bind 127.0.0.1:26257|' \
+            's|^[[:space:]]*bind[[:space:]]*:26257[[:space:]]*$|  bind *:26257|' \
             "$CONFIG"
 
-          if ! grep -Eq \
-            '^[[:space:]]*bind[[:space:]]+127\.0\.0\.1:26257[[:space:]]*$' \
-            "$CONFIG"; then
-            echo "Could not configure HAProxy listener." >&2
-            cat "$CONFIG"
-            exit 1
-          fi
+          grep -Eq \
+            '^[[:space:]]*bind[[:space:]]+\*:26257[[:space:]]*$' \
+            "$CONFIG" || {
+              echo "Could not configure HAProxy listener." >&2
+              exit 1
+            }
 
-          echo "=== Generated HAProxy configuration ==="
-          cat "$CONFIG"
+          echo "=== Transfer configuration ==="
 
-          echo "=== Validate HAProxy configuration ==="
-
-          sudo haproxy -c -f "$CONFIG"
-
-          echo "=== Install configuration and start HAProxy ==="
-
-          sudo systemctl stop haproxy || true
-
-          sudo install -m 644 \
+          sudo multipass transfer \
             "$CONFIG" \
-            /etc/haproxy/haproxy.cfg
+            db-lb:/home/ubuntu/haproxy.cfg
 
-          sudo systemctl restart haproxy
+          sudo multipass exec db-lb -- sudo bash -lc '
+            install -m 644 \
+              /home/ubuntu/haproxy.cfg \
+              /etc/haproxy/haproxy.cfg
 
-          sudo systemctl is-active --quiet haproxy
+            haproxy -c -f /etc/haproxy/haproxy.cfg
 
-          echo "HAProxy started successfully."
+            systemctl restart haproxy
+            systemctl is-active --quiet haproxy
+          '
+
+          echo "HAProxy started successfully on db-lb."
 
       - name: Verify HAProxy listener
-        shell: bash
         run: |
           set -Eeuo pipefail
 
@@ -368,8 +364,9 @@ jobs:
           ready=false
 
           for attempt in $(seq 1 30); do
-            if timeout 2 bash -c \
-              '</dev/tcp/127.0.0.1/26257' 2>/dev/null; then
+            if sudo multipass exec db-lb -- \
+              timeout 2 bash -c '</dev/tcp/127.0.0.1/26257' \
+              2>/dev/null; then
               ready=true
               break
             fi
@@ -379,26 +376,32 @@ jobs:
 
           if [[ "$ready" != true ]]; then
             echo "HAProxy is not accepting connections." >&2
-            sudo systemctl status haproxy --no-pager || true
-            sudo journalctl -u haproxy -n 100 --no-pager || true
+
+            sudo multipass exec db-lb -- \
+              sudo systemctl status haproxy --no-pager || true
+
+            sudo multipass exec db-lb -- \
+              sudo journalctl -u haproxy -n 100 --no-pager || true
+
             exit 1
           fi
 
-          echo "HAProxy is listening on 127.0.0.1:26257."
+          echo "HAProxy is listening on db-lb."
 
       - name: Perform migration on CockroachDB cluster
         env:
-          COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
+          COCKROACH_HOST: ${{ steps.guests.outputs.lb_ip }}:26257
           COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
         working-directory: database
         run: |
           bash scripts/install-flyway.sh
+          echo "Migrating through HAProxy at $COCKROACH_HOST"
           bash scripts/migrate.sh
 
       - name: Test distributed CockroachDB cluster
         working-directory: database
         env:
-          COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
+          COCKROACH_HOST: ${{ steps.guests.outputs.lb_ip }}:26257
           COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
         run: |
           bash scripts/local-test.sh
