@@ -270,6 +270,122 @@ jobs:
             /tmp/crdb-client \
             /home/ubuntu/client-certs.tar.gz || true
 
+      # Generate the HAProxy configuration using node1 as the
+      # discovery endpoint. The generated config must contain
+      # all three CockroachDB nodes.
+      - name: Configure and start HAProxy
+        env:
+          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
+          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=== Install HAProxy ==="
+
+          sudo apt-get update
+          sudo apt-get install -y haproxy
+
+          HAPROXY_DIR="$RUNNER_TEMP/haproxy"
+          mkdir -p "$HAPROXY_DIR"
+
+          echo "=== Generate HAProxy configuration ==="
+
+          docker run --rm \
+            --network host \
+            -v "$GITHUB_WORKSPACE/database/certs/client:/cockroach/certs:ro" \
+            -v "$HAPROXY_DIR:/work" \
+            -w /work \
+            "$COCKROACH_IMAGE" \
+            gen haproxy \
+              --certs-dir=/cockroach/certs \
+              --host="$NODE1_IP" \
+              --port=26257
+
+          CONFIG="$HAPROXY_DIR/haproxy.cfg"
+
+          if [[ ! -s "$CONFIG" ]]; then
+            echo "HAProxy configuration was not generated." >&2
+            exit 1
+          fi
+
+          echo "=== Verify all three backends are present ==="
+
+          for ip in "$NODE1_IP" "$NODE2_IP" "$NODE3_IP"; do
+            if ! grep -Fq "$ip:26257" "$CONFIG"; then
+              echo "Missing CockroachDB backend: $ip:26257" >&2
+              cat "$CONFIG"
+              exit 1
+            fi
+          done
+
+          echo "All three CockroachDB backends are present."
+
+          echo "=== Configure HAProxy listener ==="
+
+          # HAProxy listens only on the runner's loopback interface.
+          sed -i \
+            's|^[[:space:]]*bind[[:space:]]*:26257[[:space:]]*$|  bind 127.0.0.1:26257|' \
+            "$CONFIG"
+
+          if ! grep -Eq \
+            '^[[:space:]]*bind[[:space:]]+127\.0\.0\.1:26257[[:space:]]*$' \
+            "$CONFIG"; then
+            echo "Could not configure HAProxy listener." >&2
+            cat "$CONFIG"
+            exit 1
+          fi
+
+          echo "=== Generated HAProxy configuration ==="
+          cat "$CONFIG"
+
+          echo "=== Validate HAProxy configuration ==="
+
+          sudo haproxy -c -f "$CONFIG"
+
+          echo "=== Install configuration and start HAProxy ==="
+
+          sudo systemctl stop haproxy || true
+
+          sudo install -m 644 \
+            "$CONFIG" \
+            /etc/haproxy/haproxy.cfg
+
+          sudo systemctl restart haproxy
+
+          sudo systemctl is-active --quiet haproxy
+
+          echo "HAProxy started successfully."
+
+      - name: Verify HAProxy listener
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "=== Waiting for HAProxy listener ==="
+
+          ready=false
+
+          for attempt in $(seq 1 30); do
+            if timeout 2 bash -c \
+              '</dev/tcp/127.0.0.1/26257' 2>/dev/null; then
+              ready=true
+              break
+            fi
+
+            sleep 1
+          done
+
+          if [[ "$ready" != true ]]; then
+            echo "HAProxy is not accepting connections." >&2
+            sudo systemctl status haproxy --no-pager || true
+            sudo journalctl -u haproxy -n 100 --no-pager || true
+            exit 1
+          fi
+
+          echo "HAProxy is listening on 127.0.0.1:26257."
+
       - name: Perform migration on CockroachDB cluster
         env:
           COCKROACH_HOST: ${{ steps.guests.outputs.node1_ip }}:26257
@@ -290,6 +406,11 @@ jobs:
       - name: Collect diagnostics
         if: always()
         run: |
+          echo "========== HAProxy =========="
+
+          sudo systemctl status haproxy --no-pager || true
+          sudo journalctl -u haproxy -n 100 --no-pager || true
+
           for node in db-node1 db-node2 db-node3; do
             echo "========== $node =========="
 
