@@ -95,15 +95,24 @@ jobs:
           NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
           NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
           NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+          LB_IP:    ${{ steps.guests.outputs.lb_ip }}
         run: |
           set -Eeuo pipefail
 
           echo "=== Generate certificates ==="
           bash database/scripts/generate-ca.sh "database"
-          bash database/scripts/generate-cert-node.sh "database" node1 node1 "$NODE1_IP"
-          bash database/scripts/generate-cert-node.sh "database" node2 node2 "$NODE2_IP"
-          bash database/scripts/generate-cert-node.sh "database" node3 node3 "$NODE3_IP"
+          bash database/scripts/generate-cert-node.sh "database" node1 node1 "$NODE1_IP" "$LB_IP"
+          bash database/scripts/generate-cert-node.sh "database" node2 node2 "$NODE2_IP" "$LB_IP"
+          bash database/scripts/generate-cert-node.sh "database" node3 node3 "$NODE3_IP" "$LB_IP"
           bash database/scripts/generate-cert-client.sh "database" root
+
+          echo "=== Verify SAN for the nodes' certificates ==="
+          for node in node1 node2 node3; do
+              echo "=== $node ==="
+              openssl x509 \
+                  -in "database/certs/$node/node.crt" \
+                  -noout -ext subjectAltName
+          done
 
           echo "=== Package deployment files ==="
           mkdir -p "$RUNNER_TEMP/package"

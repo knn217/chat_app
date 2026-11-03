@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 main() {
-    if (( $# != 4 )); then
-        echo "Usage: $0 <output-dir> <node-name> <dns-name> <ip-address>" >&2
+    if (( $# < 4 || $# > 5 )); then
+        echo "Usage: $0 <output-dir> <node-name> <dns-name> <ip-address> [lb-ip]" >&2
         exit 1
     fi
 
@@ -14,6 +14,7 @@ main() {
     local node_name="$2"
     local dns_name="$3"
     local ip_address="$4"
+    local lb_ip="${5:-}"
 
     cert_validate_identity "$node_name"
     cert_init "$output_dir"
@@ -29,10 +30,19 @@ main() {
 
     echo "Generating node certificate: $node_name"
 
+    local hosts=(
+        "$node_name"
+        "$dns_name"
+        "localhost"
+        "$ip_address"
+    )
+
+    if [[ -n "$lb_ip" ]]; then
+        hosts+=("$lb_ip")
+    fi
+
     cert_run cert create-node \
-        "$node_name" \
-        "$dns_name" \
-        "$ip_address" \
+        "${hosts[@]}" \
         --certs-dir="/work/certs/$node_name" \
         --ca-key=/work/secrets/ca.key
 
