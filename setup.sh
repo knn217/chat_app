@@ -268,7 +268,13 @@ run(){
         # Load the BE image file
         docker load -i "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar"
         # 1. Start the container in detached/background mode
-        docker run -d --name "backend-container" -e PORT=8090 "backend_img:latest"
+        docker run -d \
+            --name "backend-container" \
+            -e PORT=8090 \
+            -e RUST_BACKTRACE=full \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e CHAT_BE_PORT="$CHAT_BE_PORT" \
+            "backend_img:latest"
         # 2. Stream the container logs into a file in the background (&)
         docker logs -f "backend-container" > "$SCRIPTDIR/backend.log" 2>&1 &
 
