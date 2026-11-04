@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let router = router.merge(SwaggerUi::new("/swagger-ui").url("/apidoc/openapi.json", _api));
 
     let port: u16 = env::var("CHAT_BE_PORT")?.parse()?;
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
+    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
