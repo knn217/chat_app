@@ -260,7 +260,7 @@ run(){
 &sslcert=$DOCKER_MOUNT_DIR/client.user_be.crt\
 &sslkey=$DOCKER_MOUNT_DIR/client.user_be.pem"
     # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
-    export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
+    export DATABASE_URL="postgresql://user_be@node1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs
@@ -272,6 +272,7 @@ run(){
         docker run -d \
             --name "backend-container" \
             -v $USER_BE_CERTS:$DOCKER_MOUNT_DIR:ro \
+            --net "crdb-cluster" \
             -e PORT=8090 \
             -e RUST_BACKTRACE=full \
             -e DATABASE_URL="$DATABASE_URL" \
