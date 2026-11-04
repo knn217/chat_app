@@ -17,6 +17,11 @@ main(){
     setup_env_linux
     setup_env_windows
     setup_cargo
+    # docker system prune -a
+    # docker builder prune -a
+    # docker image prune -a
+    docker container prune -f
+    docker image prune -f
     build
     run
     choices
@@ -260,9 +265,12 @@ run(){
     $PACKAGE_PATH/openapi_docs/openapi_docs
 
     if [ "$TEST" == "true" ]; then
-        docker system prune -a
+        # Load the BE image file
         docker load -i "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar"
+        # 1. Start the container in detached/background mode
         docker run -d --name "backend-container" -e PORT=8090 "backend_img:latest"
+        # 2. Stream the container logs into a file in the background (&)
+        docker logs -f "backend-container" > "$SCRIPTDIR/backend.log" 2>&1 &
 
         # Wait 2 sec for BE init
         echo "Wait 2 seconds for BE to init..."
