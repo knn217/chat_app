@@ -282,6 +282,7 @@ run(){
         echo "Starting BE in docker image..."
         docker run -d \
             --name "backend-container" \
+            -p 8090:8090 \
             -v $USER_BE_CERTS:$DOCKER_MOUNT_DIR:ro \
             --net "crdb-cluster" \
             -e NO_COLOR=1 \
