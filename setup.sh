@@ -273,6 +273,8 @@ run(){
             --name "backend-container" \
             -v $USER_BE_CERTS:$DOCKER_MOUNT_DIR:ro \
             --net "crdb-cluster" \
+            -e NO_COLOR=1 \
+            -e TERM=dumb \
             -e PORT=8090 \
             -e RUST_BACKTRACE=full \
             -e DATABASE_URL="$DATABASE_URL" \
