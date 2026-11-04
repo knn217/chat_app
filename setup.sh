@@ -253,11 +253,12 @@ run(){
     bash "$DATABASE/scripts/migrate.sh"
     bash "$DATABASE/scripts/local-test.sh"
 
-    local ROOT_CERTS="$DATABASE/certs/user_be"
+    local USER_BE_CERTS="$DATABASE/certs/user_be"
+    local DOCKER_MOUNT_DIR="/app/certs"
     local JDBC_OPTIONS="sslmode=verify-full\
-&sslrootcert=${ROOT_CERTS}/ca.crt\
-&sslcert=${ROOT_CERTS}/client.user_be.crt\
-&sslkey=${ROOT_CERTS}/client.user_be.pem"
+&sslrootcert=$DOCKER_MOUNT_DIR/ca.crt\
+&sslcert=$DOCKER_MOUNT_DIR/client.user_be.crt\
+&sslkey=$DOCKER_MOUNT_DIR/client.user_be.pem"
     # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
     export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
@@ -270,6 +271,7 @@ run(){
         # 1. Start the container in detached/background mode
         docker run -d \
             --name "backend-container" \
+            -v $USER_BE_CERTS:$DOCKER_MOUNT_DIR:ro \
             -e PORT=8090 \
             -e RUST_BACKTRACE=full \
             -e DATABASE_URL="$DATABASE_URL" \
