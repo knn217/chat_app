@@ -16,9 +16,15 @@ COPY . .
 RUN cargo build --profile=release --package=backend
 
 # Create a new stage with a minimal image
-FROM scratch
+FROM debian:bookworm-slim
+# Install required runtime libraries (like OpenSSL and SSL certificates)
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
 # Copy the bin from builder into the new minimal image
-COPY --from=builder /backend_builder/target/release/backend /backend
-ENTRYPOINT ["/backend"]
+COPY --from=builder /backend_builder/target/release/backend /app/backend
+ENTRYPOINT ["/app/backend"]
 EXPOSE 8080
