@@ -256,11 +256,13 @@ run(){
     local USER_BE_CERTS="$DATABASE/certs/user_be"
     local DOCKER_MOUNT_DIR="/app/certs"
     local JDBC_OPTIONS="sslmode=verify-full\
-&sslrootcert=$DOCKER_MOUNT_DIR/ca.crt\
-&sslcert=$DOCKER_MOUNT_DIR/client.user_be.crt\
-&sslkey=$DOCKER_MOUNT_DIR/client.user_be.pem"
+&sslrootcert=$USER_BE_CERTS/ca.crt\
+&sslcert=$USER_BE_CERTS/client.user_be.crt\
+&sslkey=$USER_BE_CERTS/client.user_be.pem"
     # NOTE: localhost and 127.0.0.1 are not interchangeable at this level
-    export DATABASE_URL="postgresql://user_be@node1:26257/chat_db?${JDBC_OPTIONS}"
+    echo "==============================================="
+    echo "Setting up env var for local openapi export bin..."
+    export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
     export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
     # Generate openapi.json
     $PACKAGE_PATH/openapi_docs/openapi_docs
@@ -269,6 +271,13 @@ run(){
         # Load the BE image file
         docker load -i "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar"
         # 1. Start the container in detached/background mode
+        echo "==============================================="
+        echo "Setting up env var for docker image..."
+        local JDBC_OPTIONS="sslmode=verify-full\
+&sslrootcert=$DOCKER_MOUNT_DIR/ca.crt\
+&sslcert=$DOCKER_MOUNT_DIR/client.user_be.crt\
+&sslkey=$DOCKER_MOUNT_DIR/client.user_be.pem"
+        export DATABASE_URL="postgresql://user_be@node1:26257/chat_db?${JDBC_OPTIONS}"
         echo "==============================================="
         echo "Starting BE in docker image..."
         docker run -d \
