@@ -269,6 +269,8 @@ run(){
         # Load the BE image file
         docker load -i "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar"
         # 1. Start the container in detached/background mode
+        echo "==============================================="
+        echo "Starting BE in docker image..."
         docker run -d \
             --name "backend-container" \
             -v $USER_BE_CERTS:$DOCKER_MOUNT_DIR:ro \
