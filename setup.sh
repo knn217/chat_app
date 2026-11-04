@@ -200,6 +200,10 @@ build(){
         done
     done
 
+    # Build docker image
+    docker compose -f "$SCRIPTDIR/docker-compose.backend.yml" build
+    docker save -o "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar" "backend_img:latest"
+
     # Copy resources into the frontend package folder
     resources
     # Package the database image and its installer
@@ -256,10 +260,9 @@ run(){
     $PACKAGE_PATH/openapi_docs/openapi_docs
 
     if [ "$TEST" == "true" ]; then
-        # Run backend in the background and save its PID
-        (RUST_BACKTRACE=full $PACKAGE_PATH/backend/backend) &
-        PID=$!
-        echo "Started BE in background process with PID: $PID"
+        docker system prune -a
+        docker load -i "$SCRIPTDIR/target/$BUILD_PROFILE/package/backend-image.tar"
+        docker run -d --name "backend-container" -e PORT=8090 "backend_img:latest"
 
         # Wait 2 sec for BE init
         echo "Wait 2 seconds for BE to init..."
@@ -272,10 +275,7 @@ run(){
 
         # Stop the process after the step is complete
         echo "Stopping the background BE process..."
-        kill $PID
-
-        # Wait to ensure it has fully terminated
-        wait $PID 2>/dev/null
+        docker stop "backend-container"
         echo "Process stopped."
 
         bash "$DATABASE/scripts/local-down.sh"
