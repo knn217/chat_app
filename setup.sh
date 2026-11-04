@@ -184,7 +184,7 @@ build(){
         local JSON=$(RUST_BACKTRACE=full cargo build \
             $LOG_LEVEL \
             --jobs=$JOBS \
-            --package $PKG \
+            --package=$PKG \
             --profile=$BUILD_PROFILE \
             --message-format=json-render-diagnostics) || exit 1
 

@@ -1,0 +1,24 @@
+# Stage 1: Compute a recipe file for caching dependencies
+FROM rust:1.99-slim AS builder
+WORKDIR /backend_builder
+
+# Install build essentials, OpenSSL headers, and curl (required for utoipa-swagger-ui build script)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the binary for image
+COPY . .
+RUN cargo build --profile=release --package=backend
+
+# Create a new stage with a minimal image
+FROM scratch
+
+# Copy the bin from builder into the new minimal image
+COPY --from=builder /backend_builder/target/release/backend /backend
+ENTRYPOINT ["/backend"]
+EXPOSE 8080
