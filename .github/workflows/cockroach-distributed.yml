@@ -19,6 +19,9 @@ jobs:
 
     env:
       COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+      SCRIPTS: .github/scripts
+      # Makes the scripts call `sudo multipass` (root-owned snap on the runner).
+      MULTIPASS_SUDO: "1"
 
     steps:
       - name: Checkout
@@ -32,7 +35,6 @@ jobs:
           CERT=/var/snap/multipass/common/data/multipassd/multipass_root_cert.pem
 
           echo "Waiting for Multipass initialization..."
-
           for i in $(seq 1 60); do
             if sudo test -s "$CERT"; then
               break
@@ -54,65 +56,44 @@ jobs:
             echo "Warning: /dev/kvm is unavailable; Multipass may run without hardware acceleration."
           fi
 
+      # Outputs: NODE1_IP, NODE2_IP, NODE3_IP, LB_IP (plus *_NAME, *_STATE, ...).
       - name: Launch Ubuntu guests
         id: guests
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          for node in db-node1 db-node2 db-node3 db-lb; do
-            echo "Launching $node..."
-
-            sudo multipass launch 24.04 \
-              --name "$node" \
-              --cpus 1 \
-              --memory 2G \
-              --disk 6G \
-              --timeout 900
+          for node in node1 node2 node3 lb; do
+            bash "$SCRIPTS/multipass-launch.sh" "db-$node" \
+              --prefix "$node" \
+              --cpus 1 --memory 2G --disk 6G --timeout 900 \
+              >> "$GITHUB_OUTPUT"
           done
-
-          declare -A ips
-
-          for node in db-node1 db-node2 db-node3 db-lb; do
-            ip=$(sudo multipass exec "$node" -- hostname -I | awk '{print $1}')
-
-            if [[ -z "$ip" ]]; then
-              echo "Could not obtain IP for $node" >&2
-              exit 1
-            fi
-
-            ips[$node]="$ip"
-            echo "$node = $ip"
-          done
-
-          echo "node1_ip=${ips[db-node1]}" >> "$GITHUB_OUTPUT"
-          echo "node2_ip=${ips[db-node2]}" >> "$GITHUB_OUTPUT"
-          echo "node3_ip=${ips[db-node3]}" >> "$GITHUB_OUTPUT"
-          echo "lb_ip=${ips[db-lb]}" >> "$GITHUB_OUTPUT"
 
       - name: Generate certificates and deployment package
         env:
-          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
-          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
-          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
-          LB_IP:    ${{ steps.guests.outputs.lb_ip }}
+          NODE1_IP: ${{ steps.guests.outputs.NODE1_IP }}
+          NODE2_IP: ${{ steps.guests.outputs.NODE2_IP }}
+          NODE3_IP: ${{ steps.guests.outputs.NODE3_IP }}
+          LB_IP: ${{ steps.guests.outputs.LB_IP }}
         run: |
           set -Eeuo pipefail
 
           echo "=== Generate certificates ==="
           bash database/scripts/generate-ca.sh "./database"
+
           bash database/scripts/generate-cert-node.sh "./database" node1 node1 "$NODE1_IP" "$LB_IP"
           bash database/scripts/generate-cert-node.sh "./database" node2 node2 "$NODE2_IP" "$LB_IP"
           bash database/scripts/generate-cert-node.sh "./database" node3 node3 "$NODE3_IP" "$LB_IP"
+
           bash database/scripts/generate-cert-client.sh "./database" root
           bash database/scripts/generate-cert-client.sh "./database" user_be
 
           echo "=== Verify SAN for the nodes' certificates ==="
           for node in node1 node2 node3; do
-              echo "=== $node ==="
-              openssl x509 \
-                  -in "database/certs/$node/node.crt" \
-                  -noout -ext subjectAltName
+            echo "=== $node ==="
+            openssl x509 \
+              -in "database/certs/$node/node.crt" \
+              -noout -ext subjectAltName
           done
 
           echo "=== Package deployment files ==="
@@ -124,49 +105,30 @@ jobs:
 
       - name: Deploy one CockroachDB node per guest
         env:
-          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
-          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
-          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+          NODE1_IP: ${{ steps.guests.outputs.NODE1_IP }}
+          NODE2_IP: ${{ steps.guests.outputs.NODE2_IP }}
+          NODE3_IP: ${{ steps.guests.outputs.NODE3_IP }}
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          JOIN_ADDRS="$NODE1_IP:26257,$NODE2_IP:26257,$NODE3_IP:26257"
+          SQL_PORT=26257
+          HTTP_PORT=8080
+          JOIN_ADDRS="$NODE1_IP:$SQL_PORT,$NODE2_IP:$SQL_PORT,$NODE3_IP:$SQL_PORT"
 
           deploy_node() {
-            local vm="$1"
-            local node="$2"
-            local ip="$3"
-            local bundle="$RUNNER_TEMP/$node"
-            local host_crdb_SQL_port="26257"
-            local host_crdb_HTTP_port="8080"
+            local vm="$1" node="$2" ip="$3"
 
-            echo "=== Preparing deployment for $node ($ip) ==="
+            echo "=== Deploying $node ($ip) ==="
 
-            rm -rf "$bundle"
-            mkdir -p "$bundle/node-certs"
-
-            # All nodes share the same deployment package,
-            # but each receives its own node certificate.
-            cp "$PACKAGE_CRDB" "$bundle/cockroach-cluster-package.tar.gz"
-            cp -a "database/certs/$node/." "$bundle/node-certs/"
-
-            tar -czf "$RUNNER_TEMP/$node.tar.gz" \
-              -C "$bundle" .
-
-            sudo multipass transfer \
-              "$RUNNER_TEMP/$node.tar.gz" \
-              "$vm:/home/ubuntu/deploy.tar.gz"
+            # Shared deployment package, plus this node's own certificates.
+            bash "$SCRIPTS/multipass-send.sh" "$vm" "$PACKAGE_CRDB" /opt/crdb-deploy
+            bash "$SCRIPTS/multipass-send.sh" "$vm" "database/certs/$node" /opt/crdb-deploy/node-certs
 
             sudo multipass exec "$vm" -- \
               sudo bash -s -- \
-                "$node" \
-                "$ip" \
-                "$COCKROACH_IMAGE" \
-                "$JOIN_ADDRS" \
-                "$host_crdb_SQL_port" \
-                "$host_crdb_HTTP_port" \
-                < .github/scripts/compose_db_cloud.sh
+              "$node" "$ip" "$COCKROACH_IMAGE" "$JOIN_ADDRS" "$SQL_PORT" "$HTTP_PORT" \
+              < "$SCRIPTS/compose_db_cloud.sh"
           }
 
           deploy_node db-node1 node1 "$NODE1_IP"
@@ -175,30 +137,15 @@ jobs:
 
       - name: Initialize CockroachDB cluster
         env:
-          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
+          NODE1_IP: ${{ steps.guests.outputs.NODE1_IP }}
         run: |
           set -Eeuo pipefail
 
-          echo "=== Prepare temporary root client certificate transfer ==="
-
-          echo "Creating archive from:"
-          ls -lR database/certs/root
-          tar -czf "$RUNNER_TEMP/client-root-certs.tar.gz" \
-            -C database/certs root
-
-          sudo multipass transfer \
-            "$RUNNER_TEMP/client-root-certs.tar.gz" \
-            db-node1:/home/ubuntu/client-root-certs.tar.gz
-
-          sudo multipass exec db-node1 -- sudo bash -lc '
-            mkdir -p /tmp/crdb-client
-            tar -xzf /home/ubuntu/client-root-certs.tar.gz \
-              -C /tmp/crdb-client
-            ls -R /tmp/crdb-client
-          '
+          echo "=== Send temporary root client certificate ==="
+          bash "$SCRIPTS/multipass-send.sh" db-node1 database/certs/root /tmp/crdb-client/root
+          sudo multipass exec db-node1 -- sudo ls -R /tmp/crdb-client
 
           echo "=== Initialize cluster ==="
-
           initialized=false
 
           for attempt in $(seq 1 60); do
@@ -209,7 +156,6 @@ jobs:
               init \
               --certs-dir=/cockroach/certs \
               --host="$NODE1_IP:26257" 2>&1); then
-
               echo "$output"
               initialized=true
               break
@@ -234,14 +180,13 @@ jobs:
 
       - name: Verify all three CockroachDB nodes
         env:
-          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
-          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
-          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+          NODE1_IP: ${{ steps.guests.outputs.NODE1_IP }}
+          NODE2_IP: ${{ steps.guests.outputs.NODE2_IP }}
+          NODE3_IP: ${{ steps.guests.outputs.NODE3_IP }}
         run: |
           set -Eeuo pipefail
 
           echo "=== Waiting for all three nodes to join the cluster ==="
-
           verified=false
 
           for attempt in $(seq 1 60); do
@@ -252,13 +197,11 @@ jobs:
               node status \
               --certs-dir=/cockroach/certs \
               --host="$NODE1_IP:26257" 2>&1); then
-
               echo "$status"
 
               if grep -Fq "$NODE1_IP:26257" <<< "$status" &&
                  grep -Fq "$NODE2_IP:26257" <<< "$status" &&
                  grep -Fq "$NODE3_IP:26257" <<< "$status"; then
-
                 verified=true
                 break
               fi
@@ -280,156 +223,53 @@ jobs:
       - name: Remove temporary client credentials
         if: always()
         run: |
-          sudo multipass exec db-node1 -- sudo rm -rf \
-            /tmp/crdb-client \
-            /home/ubuntu/client-root-certs.tar.gz || true
+          sudo multipass exec db-node1 -- sudo rm -rf /tmp/crdb-client || true
 
-      # Generate the HAProxy configuration using node1 as the
-      # discovery endpoint. The generated config must contain
-      # all three CockroachDB nodes.
+      # Installs HAProxy on db-lb, renders the config from the three node IPs,
+      # validates it, starts it and checks the listener from inside and outside
+      # the VM. Output: HAPROXY_ENDPOINT (ip:port), HAPROXY_IP, HAPROXY_PORT, ...
       - name: Configure and start HAProxy
+        id: haproxy
         env:
-          NODE1_IP: ${{ steps.guests.outputs.node1_ip }}
-          NODE2_IP: ${{ steps.guests.outputs.node2_ip }}
-          NODE3_IP: ${{ steps.guests.outputs.node3_ip }}
+          NODE1_IP: ${{ steps.guests.outputs.NODE1_IP }}
+          NODE2_IP: ${{ steps.guests.outputs.NODE2_IP }}
+          NODE3_IP: ${{ steps.guests.outputs.NODE3_IP }}
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          echo "=== Install HAProxy on db-lb ==="
-
-          sudo multipass exec db-lb -- sudo apt-get update
-
-          sudo multipass exec db-lb -- \
-            sudo apt-get install -y haproxy
-
-          echo "=== Generate HAProxy configuration ==="
-
-          HAPROXY_DIR="$RUNNER_TEMP/haproxy"
-          mkdir -p "$HAPROXY_DIR"
-
-          docker run --rm \
-            --network host \
-            -v "$GITHUB_WORKSPACE/database/certs/root:/cockroach/certs:ro" \
-            -v "$HAPROXY_DIR:/work" \
-            -w /work \
-            "$COCKROACH_IMAGE" \
-            gen haproxy \
-              --certs-dir=/cockroach/certs \
-              --host="$NODE1_IP" \
-              --port=26257
-
-          CONFIG="$HAPROXY_DIR/haproxy.cfg"
-
-          if [[ ! -s "$CONFIG" ]]; then
-            echo "HAProxy configuration was not generated." >&2
-            exit 1
-          fi
-
-          echo "=== Verify all three backends ==="
-
-          for ip in "$NODE1_IP" "$NODE2_IP" "$NODE3_IP"; do
-            grep -Fq "$ip:26257" "$CONFIG" || {
-              echo "Missing backend: $ip:26257" >&2
-              exit 1
-            }
-          done
-
-          echo "=== Configure listener ==="
-
-          # Listen on all interfaces of db-lb.
-          sed -i \
-            's|^[[:space:]]*bind[[:space:]]*:26257[[:space:]]*$|  bind *:26257|' \
-            "$CONFIG"
-
-          grep -Eq \
-            '^[[:space:]]*bind[[:space:]]+\*:26257[[:space:]]*$' \
-            "$CONFIG" || {
-              echo "Could not configure HAProxy listener." >&2
-              exit 1
-            }
-
-          echo "=== Transfer configuration ==="
-
-          sudo multipass transfer \
-            "$CONFIG" \
-            db-lb:/home/ubuntu/haproxy.cfg
-
-          sudo multipass exec db-lb -- sudo bash -lc '
-            install -m 644 \
-              /home/ubuntu/haproxy.cfg \
-              /etc/haproxy/haproxy.cfg
-
-            haproxy -c -f /etc/haproxy/haproxy.cfg
-
-            systemctl restart haproxy
-            systemctl is-active --quiet haproxy
-          '
-
-          echo "HAProxy started successfully on db-lb."
-
-      - name: Verify HAProxy listener
-        run: |
-          set -Eeuo pipefail
-
-          echo "=== Waiting for HAProxy listener ==="
-
-          ready=false
-
-          for attempt in $(seq 1 30); do
-            if sudo multipass exec db-lb -- \
-              timeout 2 bash -c '</dev/tcp/127.0.0.1/26257' \
-              2>/dev/null; then
-              ready=true
-              break
-            fi
-
-            sleep 1
-          done
-
-          if [[ "$ready" != true ]]; then
-            echo "HAProxy is not accepting connections." >&2
-
-            sudo multipass exec db-lb -- \
-              sudo systemctl status haproxy --no-pager || true
-
-            sudo multipass exec db-lb -- \
-              sudo journalctl -u haproxy -n 100 --no-pager || true
-
-            exit 1
-          fi
-
-          echo "HAProxy is listening on db-lb."
+          bash "$SCRIPTS/haproxy-setup.sh" db-lb \
+            --prefix haproxy \
+            "$NODE1_IP" "$NODE2_IP" "$NODE3_IP" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Perform migration on CockroachDB cluster
         env:
-          COCKROACH_HOST: ${{ steps.guests.outputs.lb_ip }}:26257
-          COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+          COCKROACH_HOST: ${{ steps.haproxy.outputs.HAPROXY_ENDPOINT }}
         working-directory: database
         run: |
           bash scripts/install-flyway.sh
+
           echo "Migrating through HAProxy at $COCKROACH_HOST"
           bash scripts/migrate.sh
 
       - name: Test distributed CockroachDB cluster
         working-directory: database
         env:
-          COCKROACH_HOST: ${{ steps.guests.outputs.lb_ip }}:26257
-          COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+          COCKROACH_HOST: ${{ steps.haproxy.outputs.HAPROXY_ENDPOINT }}
         run: |
           bash scripts/local-test.sh
 
       - name: Collect diagnostics
         if: always()
         run: |
-          echo "========== HAProxy =========="
-
-          sudo systemctl status haproxy --no-pager || true
-          sudo journalctl -u haproxy -n 100 --no-pager || true
+          echo "========== HAProxy (db-lb) =========="
+          sudo multipass exec db-lb -- \
+            sudo systemctl status haproxy --no-pager || true
+          sudo multipass exec db-lb -- \
+            sudo journalctl -u haproxy -n 100 --no-pager || true
 
           for node in db-node1 db-node2 db-node3; do
             echo "========== $node =========="
-
             sudo multipass info "$node" || true
 
             sudo multipass exec "$node" -- \
