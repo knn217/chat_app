@@ -11,6 +11,7 @@ export COCKROACH_IMAGE="${COCKROACH_IMAGE:-cockroachdb/cockroach:v26.2.2}"
 IMAGE="$COCKROACH_IMAGE"
 COCKROACH_HOST="${COCKROACH_HOST:-127.0.0.1:26257}"
 COCKROACH_DATABASE="${COCKROACH_DATABASE:-chat_db}"
+DB_NODE_COUNT="${DB_NODE_COUNT:-3}"
 
 main() {
     check_certificates
@@ -74,19 +75,19 @@ wait_for_cluster() {
                         print n+0
                     }')"
 
-            if [[ "$node_count" -eq 3 ]]; then
+            if [[ "$node_count" -eq "$DB_NODE_COUNT" ]]; then
                 break
             fi
         fi
 
-        echo "Waiting for all 3 nodes (attempt $attempt/60; currently $node_count)..."
+        echo "Waiting for all $DB_NODE_COUNT nodes (attempt $attempt/60; currently $node_count)..."
         sleep 5
     done
 
     printf '%s\n' "$node_status"
 
-    if [[ "$node_count" -ne 3 ]]; then
-        echo "Expected exactly 3 live nodes; node status reported $node_count." >&2
+    if [[ "$node_count" -ne "$DB_NODE_COUNT" ]]; then
+        echo "Expected exactly $DB_NODE_COUNT live nodes; node status reported $node_count." >&2
         exit 1
     fi
 }
