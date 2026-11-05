@@ -119,7 +119,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/package"
           bash database/scripts/package.sh "$RUNNER_TEMP/package"
 
-          echo "PACKAGE=$RUNNER_TEMP/package/cockroach-cluster-package.tar.gz" \
+          echo "PACKAGE_CRDB=$RUNNER_TEMP/package/cockroach-cluster-package.tar.gz" \
             >> "$GITHUB_ENV"
 
       - name: Deploy one CockroachDB node per guest
@@ -148,7 +148,7 @@ jobs:
 
             # All nodes share the same deployment package,
             # but each receives its own node certificate.
-            cp "$PACKAGE" "$bundle/cockroach-cluster-package.tar.gz"
+            cp "$PACKAGE_CRDB" "$bundle/cockroach-cluster-package.tar.gz"
             cp -a "database/certs/$node/." "$bundle/node-certs/"
 
             tar -czf "$RUNNER_TEMP/$node.tar.gz" \
