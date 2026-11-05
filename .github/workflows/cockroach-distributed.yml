@@ -3,21 +3,27 @@ name: CockroachDB Distributed Cluster
 on:
   workflow_dispatch:
     inputs:
-      node_count:
-        description: Number of CockroachDB nodes (3 or more recommended)
+      db_node_count:
+        description: Number of database (CockroachDB) nodes (3 or more recommended)
         required: false
         type: number
-        default: 3
+        default: 2
+      be_node_count:
+        description: Number of backend nodes
+        required: false
+        type: number
+        default: 1
       keep_vms:
         description: Skip VM cleanup before the GitHub runner is destroyed (debugging only)
         required: false
         type: boolean
         default: false
 
-# Number of CockroachDB nodes to create. Set it from the "Run workflow" form,
-# or change the fallback here.
+# Cluster sizes. Set them from the "Run workflow" form, or change the
+# fallbacks here.
 env:
-  NODE_COUNT: ${{ inputs.node_count || 3 }}
+  DB_NODE_COUNT: ${{ inputs.db_node_count || 2 }}
+  BE_NODE_COUNT: ${{ inputs.be_node_count || 1 }}
 
 permissions:
   contents: read
@@ -25,15 +31,21 @@ permissions:
 jobs:
   distributed-cluster:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
-      COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
-      SQL_PORT: "26257"
-      HTTP_PORT: "8080"
       SCRIPTS: .github/scripts
       # Makes the scripts call `sudo multipass` (root-owned snap on the runner).
       MULTIPASS_SUDO: "1"
+      # Database
+      COCKROACH_IMAGE: cockroachdb/cockroach:v26.2.2
+      DB_SQL_PORT: "26257"
+      DB_HTTP_PORT: "8080"
+      DB_VM_MEMORY: 2G
+      # Backend
+      BE_PORT: "8090"
+      BE_HEALTH_PATH: /api/v1/auth/me
+      BE_VM_MEMORY: 1G
 
     steps:
       - name: Checkout
@@ -41,21 +53,38 @@ jobs:
 
       - name: Validate inputs
         run: |
-          if ! [[ "$NODE_COUNT" =~ ^[1-9][0-9]*$ ]]; then
-            echo "NODE_COUNT must be a positive integer, got: '$NODE_COUNT'" >&2
-            exit 1
+          for var in DB_NODE_COUNT BE_NODE_COUNT; do
+            if ! [[ "${!var}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "$var must be a positive integer, got: '${!var}'" >&2
+              exit 1
+            fi
+          done
+          if (( DB_NODE_COUNT < 3 )); then
+            echo "::warning::DB_NODE_COUNT=$DB_NODE_COUNT: the cluster will work, but ranges cannot be fully replicated (3 nodes needed for the default replication factor)."
           fi
-          if (( NODE_COUNT < 3 )); then
-            echo "::warning::NODE_COUNT=$NODE_COUNT: the cluster will work, but ranges cannot be fully replicated (3 nodes needed for the default replication factor)."
+          # Rough VM memory budget: each cluster has its nodes plus one load balancer.
+          db_gb=$(( (DB_NODE_COUNT + 1) * ${DB_VM_MEMORY%G} ))
+          be_gb=$(( (BE_NODE_COUNT + 1) * ${BE_VM_MEMORY%G} ))
+          if (( db_gb + be_gb > 12 )); then
+            echo "::warning::VMs need about $((db_gb + be_gb)) GB RAM in total; a standard runner has 16 GB and may run out of memory."
           fi
-          if (( NODE_COUNT > 5 )); then
-            echo "::warning::NODE_COUNT=$NODE_COUNT: each node VM uses 2 GB RAM; a standard runner may run out of memory."
-          fi
-          echo "Creating $NODE_COUNT node(s)."
+          echo "Creating $DB_NODE_COUNT database node(s) and $BE_NODE_COUNT backend node(s)."
 
-      # Everything that does not depend on VM IPs is prepared up front, so
-      # a problem here fails fast, before any VM is launched.
-      - name: Generate shared certificates and deployment package
+      # Built first and before any certificate exists: the Docker build context
+      # is the whole repository, and a failed Rust build should stop the run
+      # before any VM is launched. Needs only Docker.
+      - name: Build backend image
+        id: be_image
+        run: |
+          set -Eeuo pipefail
+          bash "$SCRIPTS/be-image-build.sh" \
+            --out "$RUNNER_TEMP/be-image/backend-image.tar" \
+            --prune \
+            >> "$GITHUB_OUTPUT"
+
+      # Everything for the database that does not depend on VM IPs is prepared
+      # up front, so a problem here fails fast, before any VM is launched.
+      - name: Generate shared database certificates and deployment package
         run: |
           set -Eeuo pipefail
 
@@ -98,149 +127,214 @@ jobs:
             echo "Warning: /dev/kvm is unavailable; Multipass may run without hardware acceleration."
           fi
 
-      # The load balancer VM is launched first because every node certificate
-      # needs its IP. HAProxy itself is configured in a separate step below.
-      # Outputs: LB_IP, NODE_IPS (comma-separated, in node order), and the
-      # full handle of every VM (NODE1_IP, NODE1_STATE, ...).
-      - name: Launch Ubuntu guests
-        id: guests
-        shell: bash
+      # ------------------------------------------------------------------
+      # Database cluster
+      # ------------------------------------------------------------------
+
+      # VMs: db-lb, db-node1 ... db-nodeN. The load balancer is launched first
+      # because every node certificate needs its IP.
+      # Outputs: DB_LB_IP, DB_NODE_IPS (comma-separated, in node order), and
+      # the full handle of every VM (DB_NODE1_IP, DB_NODE1_STATE, ...).
+      - name: Launch database guests
+        id: db_guests
         run: |
           set -Eeuo pipefail
-
-          # value_of "<KEY=VALUE lines>" KEY
-          value_of() { grep -m1 "^$2=" <<< "$1" | cut -d= -f2-; }
-
-          out=$(bash "$SCRIPTS/multipass-launch.sh" db-lb \
-            --prefix lb --cpus 1 --memory 2G --disk 6G --timeout 900)
-          echo "$out" >> "$GITHUB_OUTPUT"
-          [[ -n "$(value_of "$out" LB_IP)" ]] || { echo "No IP for db-lb" >&2; exit 1; }
-
-          ips=()
-          for i in $(seq 1 "$NODE_COUNT"); do
-            out=$(bash "$SCRIPTS/multipass-launch.sh" "db-node$i" \
-              --prefix "node$i" --cpus 1 --memory 2G --disk 6G --timeout 900)
-            echo "$out" >> "$GITHUB_OUTPUT"
-
-            ip=$(value_of "$out" "NODE${i}_IP")
-            [[ -n "$ip" ]] || { echo "No IP for db-node$i" >&2; exit 1; }
-            ips+=("$ip")
-          done
-
-          echo "NODE_IPS=$(IFS=,; echo "${ips[*]}")" >> "$GITHUB_OUTPUT"
+          bash "$SCRIPTS/multipass-cluster-launch.sh" db \
+            --nodes "$DB_NODE_COUNT" \
+            --memory "$DB_VM_MEMORY" \
+            >> "$GITHUB_OUTPUT"
 
       # One loop: each node goes from certificate to running container.
-      - name: Deploy CockroachDB nodes
-        id: deploy
+      - name: Deploy database nodes
+        id: db_deploy
         env:
-          NODE_IPS: ${{ steps.guests.outputs.NODE_IPS }}
-          LB_IP: ${{ steps.guests.outputs.LB_IP }}
+          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
+          DB_LB_IP: ${{ steps.db_guests.outputs.DB_LB_IP }}
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          IFS=, read -ra IPS <<< "$NODE_IPS"
-          if (( ${#IPS[@]} != NODE_COUNT )); then
-            echo "Expected $NODE_COUNT node IPs, got ${#IPS[@]}: $NODE_IPS" >&2
+          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
+          if (( ${#IPS[@]} != DB_NODE_COUNT )); then
+            echo "Expected $DB_NODE_COUNT node IPs, got ${#IPS[@]}: $DB_NODE_IPS" >&2
             exit 1
           fi
 
           join=""
           for ip in "${IPS[@]}"; do
-            join+="${join:+,}$ip:$SQL_PORT"
+            join+="${join:+,}$ip:$DB_SQL_PORT"
           done
 
-          for i in $(seq 1 "$NODE_COUNT"); do
+          for i in $(seq 1 "$DB_NODE_COUNT"); do
             bash "$SCRIPTS/cockroach-node-deploy.sh" \
               --vm "db-node$i" \
               --node "node$i" \
               --ip "${IPS[i-1]}" \
-              --lb-ip "$LB_IP" \
+              --lb-ip "$DB_LB_IP" \
               --join "$join" \
               --image "$COCKROACH_IMAGE" \
               --package "$PACKAGE_CRDB" \
               --db-dir ./database \
-              --sql-port "$SQL_PORT" \
-              --http-port "$HTTP_PORT" \
-              --prefix "node${i}_deploy" \
+              --sql-port "$DB_SQL_PORT" \
+              --http-port "$DB_HTTP_PORT" \
+              --prefix "db_node${i}_deploy" \
               >> "$GITHUB_OUTPUT"
           done
 
-      - name: Initialize CockroachDB cluster
+      - name: Initialize database cluster
         env:
-          NODE_IPS: ${{ steps.guests.outputs.NODE_IPS }}
+          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$NODE_IPS"
+          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
 
           bash "$SCRIPTS/cockroach-init.sh" db-node1 \
             --ip "${IPS[0]}" \
             --image "$COCKROACH_IMAGE" \
             --certs-dir database/certs/root \
-            --port "$SQL_PORT"
+            --port "$DB_SQL_PORT"
 
-      - name: Verify all CockroachDB nodes
+      - name: Verify all database nodes
         env:
-          NODE_IPS: ${{ steps.guests.outputs.NODE_IPS }}
+          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$NODE_IPS"
+          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
 
           bash "$SCRIPTS/cockroach-verify.sh" db-node1 \
             --image "$COCKROACH_IMAGE" \
             --certs-dir database/certs/root \
-            --port "$SQL_PORT" \
+            --port "$DB_SQL_PORT" \
             "${IPS[@]}"
 
       # Installs HAProxy on db-lb, renders the config from the node IPs,
       # validates it, starts it and checks the listener from inside and outside
-      # the VM. Output: HAPROXY_ENDPOINT (ip:port), HAPROXY_IP, HAPROXY_PORT, ...
-      - name: Configure and start HAProxy
-        id: haproxy
+      # the VM. Output: DB_LB_ENDPOINT (ip:port), DB_LB_IP, DB_LB_PORT, ...
+      - name: Configure and start database load balancer
+        id: db_haproxy
         env:
-          NODE_IPS: ${{ steps.guests.outputs.NODE_IPS }}
+          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$NODE_IPS"
+          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
 
-          bash "$SCRIPTS/haproxy-setup.sh" db-lb \
-            --prefix haproxy \
-            --listen-port "$SQL_PORT" \
-            --backend-port "$SQL_PORT" \
-            --health-port "$HTTP_PORT" \
+          bash "$SCRIPTS/haproxy-db-setup.sh" db-lb \
+            --prefix db_lb \
+            --listen-port "$DB_SQL_PORT" \
+            --backend-port "$DB_SQL_PORT" \
+            --health-port "$DB_HTTP_PORT" \
             "${IPS[@]}" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Perform migration on CockroachDB cluster
+      - name: Perform database migration
         env:
-          COCKROACH_HOST: ${{ steps.haproxy.outputs.HAPROXY_ENDPOINT }}
+          COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
         working-directory: database
         run: |
           bash scripts/install-flyway.sh
 
-          echo "Migrating through HAProxy at $COCKROACH_HOST"
+          echo "Migrating through the database load balancer at $COCKROACH_HOST"
           bash scripts/migrate.sh
 
-      - name: Test distributed CockroachDB cluster
+      - name: Test distributed database cluster
         working-directory: database
         env:
-          COCKROACH_HOST: ${{ steps.haproxy.outputs.HAPROXY_ENDPOINT }}
+          COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
         run: |
           bash scripts/local-test.sh
+
+      # ------------------------------------------------------------------
+      # Backend cluster (started after the migration: it needs the schema)
+      # ------------------------------------------------------------------
+
+      # VMs: be-lb, be-node1 ... be-nodeN.
+      # Outputs: BE_LB_IP, BE_NODE_IPS, and the full handle of every VM.
+      - name: Launch backend guests
+        id: be_guests
+        run: |
+          set -Eeuo pipefail
+          bash "$SCRIPTS/multipass-cluster-launch.sh" be \
+            --nodes "$BE_NODE_COUNT" \
+            --memory "$BE_VM_MEMORY" \
+            >> "$GITHUB_OUTPUT"
+
+      # One loop: each node gets the image tar and the database client
+      # certificates, then runs the container. The backend reaches the
+      # database through the database load balancer.
+      - name: Deploy backend nodes
+        id: be_deploy
+        env:
+          BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
+          DB_LB_IP: ${{ steps.db_haproxy.outputs.DB_LB_IP }}
+          BE_IMAGE_TAR: ${{ steps.be_image.outputs.BE_IMAGE_TAR }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          IFS=, read -ra IPS <<< "$BE_NODE_IPS"
+          if (( ${#IPS[@]} != BE_NODE_COUNT )); then
+            echo "Expected $BE_NODE_COUNT node IPs, got ${#IPS[@]}: $BE_NODE_IPS" >&2
+            exit 1
+          fi
+
+          for i in $(seq 1 "$BE_NODE_COUNT"); do
+            bash "$SCRIPTS/be-node-deploy.sh" \
+              --vm "be-node$i" \
+              --db-host "$DB_LB_IP" \
+              --db-port "$DB_SQL_PORT" \
+              --image-tar "$BE_IMAGE_TAR" \
+              --certs-dir database/certs/user_be \
+              --port "$BE_PORT" \
+              --health-path "$BE_HEALTH_PATH" \
+              --prefix "be_node${i}_deploy" \
+              >> "$GITHUB_OUTPUT"
+          done
+
+      # Output: BE_LB_ENDPOINT (ip:port), BE_LB_IP, BE_LB_PORT, ...
+      - name: Configure and start backend load balancer
+        id: be_haproxy
+        env:
+          BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          IFS=, read -ra IPS <<< "$BE_NODE_IPS"
+
+          bash "$SCRIPTS/haproxy-lb-setup.sh" be-lb \
+            --prefix be_lb \
+            --service-name api \
+            --backend-port "$BE_PORT" \
+            --health-path "$BE_HEALTH_PATH" \
+            "${IPS[@]}" \
+            >> "$GITHUB_OUTPUT"
+
+      # Smoke test only; the API test suite comes in a later phase.
+      - name: Smoke test backend through its load balancer
+        env:
+          BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
+        run: |
+          set -Eeuo pipefail
+          url="http://$BE_LB_ENDPOINT$BE_HEALTH_PATH"
+
+          bash "$SCRIPTS/wait-for.sh" --timeout 60 --interval 2 \
+            --desc "GET $url" -- curl -fsS "$url"
+
+          echo "--- response:"
+          curl -fsS -w '\nHTTP %{http_code}\n' "$url"
 
       - name: Collect diagnostics
         if: always()
         run: |
-          echo "========== HAProxy (db-lb) =========="
+          echo "========== database load balancer (db-lb) =========="
           sudo multipass exec db-lb -- \
             sudo systemctl status haproxy --no-pager || true
           sudo multipass exec db-lb -- \
             sudo journalctl -u haproxy -n 100 --no-pager || true
 
-          for i in $(seq 1 "$NODE_COUNT"); do
+          for i in $(seq 1 "$DB_NODE_COUNT"); do
             node="db-node$i"
             echo "========== $node =========="
             sudo multipass info "$node" || true
@@ -250,6 +344,25 @@ jobs:
 
             sudo multipass exec "$node" -- \
               sudo docker logs "cockroach-node$i" \
+              --tail 100 || true
+          done
+
+          echo "========== backend load balancer (be-lb) =========="
+          sudo multipass exec be-lb -- \
+            sudo systemctl status haproxy --no-pager || true
+          sudo multipass exec be-lb -- \
+            sudo journalctl -u haproxy -n 100 --no-pager || true
+
+          for i in $(seq 1 "$BE_NODE_COUNT"); do
+            node="be-node$i"
+            echo "========== $node =========="
+            sudo multipass info "$node" || true
+
+            sudo multipass exec "$node" -- \
+              sudo docker ps -a || true
+
+            sudo multipass exec "$node" -- \
+              sudo docker logs backend-container \
               --tail 100 || true
           done
 
