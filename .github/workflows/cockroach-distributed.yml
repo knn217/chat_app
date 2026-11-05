@@ -325,6 +325,26 @@ jobs:
           echo "--- response:"
           curl -fsS -w '\nHTTP %{http_code}\n' "$url"
 
+      - name: schemathesis test for API
+        env:
+          BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
+        run: |
+          set -Eeuo pipefail
+          local USER_BE_CERTS="database/certs/user_be"
+          local JDBC_OPTIONS="sslmode=verify-full&sslrootcert=$USER_BE_CERTS/ca.crt&sslcert=$USER_BE_CERTS/client.user_be.crt&sslkey=$USER_BE_CERTS/client.user_be.pem"
+          echo "==============================================="
+          echo "Setting up env var for local openapi export bin..."
+          export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
+          export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
+          RUST_BACKTRACE=full cargo run \
+            --package=backend \
+            --bin openapi_docs \
+            --profile=release
+          echo "==============================================="
+          echo "Running schemathesis API tests..."
+          schemathesis run "./openapi.json" \
+            --url=http://$BE_LB_ENDPOINT
+
       - name: Collect diagnostics
         if: always()
         run: |
