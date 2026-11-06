@@ -360,7 +360,7 @@ jobs:
             --profile=release
           echo "==============================================="
           echo "Installing schemathesis..."
-          cargo install --locked uv
+          wget -qO- https://astral.sh/uv/install.sh | sh
           uv tool install schemathesis
           echo "==============================================="
           echo "Running schemathesis API tests..."
