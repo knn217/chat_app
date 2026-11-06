@@ -49,9 +49,11 @@ jobs:
 
     steps:
       - name: Checkout
+        timeout-minutes: 2
         uses: actions/checkout@v4
 
       - name: Validate inputs
+        timeout-minutes: 2
         run: |
           for var in DB_NODE_COUNT BE_NODE_COUNT; do
             if ! [[ "${!var}" =~ ^[1-9][0-9]*$ ]]; then
@@ -74,6 +76,7 @@ jobs:
       # is the whole repository, and a failed Rust build should stop the run
       # before any VM is launched. Needs only Docker.
       - name: Build backend image
+        timeout-minutes: 20
         id: be_image
         run: |
           set -Eeuo pipefail
@@ -85,6 +88,7 @@ jobs:
       # Everything for the database that does not depend on VM IPs is prepared
       # up front, so a problem here fails fast, before any VM is launched.
       - name: Generate shared database certificates and deployment package
+        timeout-minutes: 2
         run: |
           set -Eeuo pipefail
 
@@ -100,8 +104,9 @@ jobs:
 
       # Use root consistently for all Multipass commands.
       - name: Install Multipass
+        timeout-minutes: 30
         run: |
-          sudo snap install multipass
+          script -q -c 'sudo snap install multipass --classic'
 
           CERT=/var/snap/multipass/common/data/multipassd/multipass_root_cert.pem
 
@@ -136,6 +141,7 @@ jobs:
       # Outputs: DB_LB_IP, DB_NODE_IPS (comma-separated, in node order), and
       # the full handle of every VM (DB_NODE1_IP, DB_NODE1_STATE, ...).
       - name: Launch database guests
+        timeout-minutes: 5
         id: db_guests
         run: |
           set -Eeuo pipefail
@@ -146,6 +152,7 @@ jobs:
 
       # One loop: each node goes from certificate to running container.
       - name: Deploy database nodes
+        timeout-minutes: 5
         id: db_deploy
         env:
           DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
@@ -182,6 +189,7 @@ jobs:
           done
 
       - name: Initialize database cluster
+        timeout-minutes: 5
         env:
           DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
         shell: bash
@@ -196,6 +204,7 @@ jobs:
             --port "$DB_SQL_PORT"
 
       - name: Verify all database nodes
+        timeout-minutes: 5
         env:
           DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
         shell: bash
@@ -213,6 +222,7 @@ jobs:
       # validates it, starts it and checks the listener from inside and outside
       # the VM. Output: DB_LB_ENDPOINT (ip:port), DB_LB_IP, DB_LB_PORT, ...
       - name: Configure and start database load balancer
+        timeout-minutes: 5
         id: db_haproxy
         env:
           DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
@@ -230,6 +240,7 @@ jobs:
             >> "$GITHUB_OUTPUT"
 
       - name: Perform database migration
+        timeout-minutes: 5
         env:
           COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
         working-directory: database
@@ -240,6 +251,7 @@ jobs:
           bash scripts/migrate.sh
 
       - name: Test distributed database cluster
+        timeout-minutes: 5
         working-directory: database
         env:
           COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
@@ -253,6 +265,7 @@ jobs:
       # VMs: be-lb, be-node1 ... be-nodeN.
       # Outputs: BE_LB_IP, BE_NODE_IPS, and the full handle of every VM.
       - name: Launch backend guests
+        timeout-minutes: 5
         id: be_guests
         run: |
           set -Eeuo pipefail
@@ -265,6 +278,7 @@ jobs:
       # certificates, then runs the container. The backend reaches the
       # database through the database load balancer.
       - name: Deploy backend nodes
+        timeout-minutes: 5
         id: be_deploy
         env:
           BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
@@ -295,6 +309,7 @@ jobs:
 
       # Output: BE_LB_ENDPOINT (ip:port), BE_LB_IP, BE_LB_PORT, ...
       - name: Configure and start backend load balancer
+        timeout-minutes: 5
         id: be_haproxy
         env:
           BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
@@ -313,6 +328,7 @@ jobs:
 
       # Smoke test only; the API test suite comes in a later phase.
       - name: Smoke test backend through its load balancer
+        timeout-minutes: 5
         env:
           BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
         run: |
@@ -326,26 +342,33 @@ jobs:
           curl -fsS -w '\nHTTP %{http_code}\n' "$url"
 
       - name: schemathesis test for API
+        timeout-minutes: 20
         env:
+          DB_LB_ENDPOINT: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
           BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
         run: |
           set -Eeuo pipefail
-          local USER_BE_CERTS="database/certs/user_be"
-          local JDBC_OPTIONS="sslmode=verify-full&sslrootcert=$USER_BE_CERTS/ca.crt&sslcert=$USER_BE_CERTS/client.user_be.crt&sslkey=$USER_BE_CERTS/client.user_be.pem"
+          USER_BE_CERTS="database/certs/user_be"
+          JDBC_OPTIONS="sslmode=verify-full&sslrootcert=$USER_BE_CERTS/ca.crt&sslcert=$USER_BE_CERTS/client.user_be.crt&sslkey=$USER_BE_CERTS/client.user_be.pem"
           echo "==============================================="
           echo "Setting up env var for local openapi export bin..."
-          export DATABASE_URL="postgresql://user_be@127.0.0.1:26257/chat_db?${JDBC_OPTIONS}"
+          export DATABASE_URL="postgresql://user_be@$DB_LB_ENDPOINT/chat_db?${JDBC_OPTIONS}"
           export CHAT_BE_PORT=8090 # Port 8080 is already taken by the DB cluster
           RUST_BACKTRACE=full cargo run \
             --package=backend \
             --bin openapi_docs \
             --profile=release
           echo "==============================================="
+          echo "Installing schemathesis..."
+          cargo install --locked uv
+          uv tool install schemathesis
+          echo "==============================================="
           echo "Running schemathesis API tests..."
           schemathesis run "./openapi.json" \
             --url=http://$BE_LB_ENDPOINT
 
       - name: Collect diagnostics
+        timeout-minutes: 5
         if: always()
         run: |
           echo "========== database load balancer (db-lb) =========="
@@ -387,6 +410,7 @@ jobs:
           done
 
       - name: Delete Multipass VMs
+        timeout-minutes: 2
         if: ${{ always() && !inputs.keep_vms }}
         run: |
           sudo multipass delete --all || true
