@@ -136,113 +136,56 @@ jobs:
       # Database cluster
       # ------------------------------------------------------------------
 
-      # VMs: db-lb, db-node1 ... db-nodeN. The load balancer is launched first
-      # because every node certificate needs its IP.
-      # Outputs: DB_LB_IP, DB_NODE_IPS (comma-separated, in node order), and
-      # the full handle of every VM (DB_NODE1_IP, DB_NODE1_STATE, ...).
-      - name: Launch database guests
+      # The load balancer VM is launched first because every node certificate
+      # needs its IP. HAProxy itself is installed when the first node is added.
+      - name: Launch database load balancer VM
         timeout-minutes: 5
-        id: db_guests
+        id: db_lb
         run: |
           set -Eeuo pipefail
-          bash "$SCRIPTS/multipass-cluster-launch.sh" db \
-            --nodes "$DB_NODE_COUNT" \
-            --memory "$DB_VM_MEMORY" \
+          bash "$SCRIPTS/multipass-launch.sh" db-lb --prefix DB_LB \
+            --cpus 1 --memory "$DB_VM_MEMORY" --disk 6G --timeout 900 \
             >> "$GITHUB_OUTPUT"
 
-      # One loop: each node goes from certificate to running container.
-      - name: Deploy database nodes
-        timeout-minutes: 5
-        id: db_deploy
+      # One loop, one node at a time. Each node goes all the way:
+      #   launch VM -> certificate + deploy -> (init, node 1 only)
+      #   -> joined the cluster -> added to the load balancer
+      # Outputs: DB_NODE_IPS (comma-separated, in node order), DB_LB_ENDPOINT,
+      # and the VM handle / deploy outputs of every node.
+      - name: Add database nodes, one at a time
+        timeout-minutes: 30
+        id: db_nodes
         env:
-          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
-          DB_LB_IP: ${{ steps.db_guests.outputs.DB_LB_IP }}
+          DB_LB_IP: ${{ steps.db_lb.outputs.DB_LB_IP }}
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
-          if (( ${#IPS[@]} != DB_NODE_COUNT )); then
-            echo "Expected $DB_NODE_COUNT node IPs, got ${#IPS[@]}: $DB_NODE_IPS" >&2
-            exit 1
-          fi
-
-          join=""
-          for ip in "${IPS[@]}"; do
-            join+="${join:+,}$ip:$DB_SQL_PORT"
-          done
-
+          ips=""
           for i in $(seq 1 "$DB_NODE_COUNT"); do
-            bash "$SCRIPTS/cockroach-node-deploy.sh" \
-              --vm "db-node$i" \
-              --node "node$i" \
-              --ip "${IPS[i-1]}" \
+            echo "::group::Database node $i of $DB_NODE_COUNT"
+            out=$(bash "$SCRIPTS/db-add-node.sh" "$i" \
               --lb-ip "$DB_LB_IP" \
-              --join "$join" \
+              --known-ips "$ips" \
               --image "$COCKROACH_IMAGE" \
               --package "$PACKAGE_CRDB" \
               --db-dir ./database \
+              --certs-dir database/certs/root \
               --sql-port "$DB_SQL_PORT" \
               --http-port "$DB_HTTP_PORT" \
-              --prefix "db_node${i}_deploy" \
-              >> "$GITHUB_OUTPUT"
+              --memory "$DB_VM_MEMORY")
+            echo "::endgroup::"
+            echo "$out" >> "$GITHUB_OUTPUT"
+            ips="${ips:+$ips,}$(sed -n "s/^DB_NODE${i}_IP=//p" <<<"$out")"
           done
-
-      - name: Initialize database cluster
-        timeout-minutes: 5
-        env:
-          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
-
-          bash "$SCRIPTS/cockroach-init.sh" db-node1 \
-            --ip "${IPS[0]}" \
-            --image "$COCKROACH_IMAGE" \
-            --certs-dir database/certs/root \
-            --port "$DB_SQL_PORT"
-
-      - name: Verify all database nodes
-        timeout-minutes: 5
-        env:
-          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
-
-          bash "$SCRIPTS/cockroach-verify.sh" db-node1 \
-            --image "$COCKROACH_IMAGE" \
-            --certs-dir database/certs/root \
-            --port "$DB_SQL_PORT" \
-            "${IPS[@]}"
-
-      # Installs HAProxy on db-lb, renders the config from the node IPs,
-      # validates it, starts it and checks the listener from inside and outside
-      # the VM. Output: DB_LB_ENDPOINT (ip:port), DB_LB_IP, DB_LB_PORT, ...
-      - name: Configure and start database load balancer
-        timeout-minutes: 5
-        id: db_haproxy
-        env:
-          DB_NODE_IPS: ${{ steps.db_guests.outputs.DB_NODE_IPS }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$DB_NODE_IPS"
-
-          bash "$SCRIPTS/haproxy-db-setup.sh" db-lb \
-            --prefix db_lb \
-            --listen-port "$DB_SQL_PORT" \
-            --backend-port "$DB_SQL_PORT" \
-            --health-port "$DB_HTTP_PORT" \
-            "${IPS[@]}" \
-            >> "$GITHUB_OUTPUT"
+          {
+            echo "DB_NODE_IPS=$ips"
+            echo "DB_LB_ENDPOINT=$DB_LB_IP:$DB_SQL_PORT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Perform database migration
         timeout-minutes: 5
         env:
-          COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
+          COCKROACH_HOST: ${{ steps.db_nodes.outputs.DB_LB_ENDPOINT }}
         working-directory: database
         run: |
           bash scripts/install-flyway.sh
@@ -254,7 +197,7 @@ jobs:
         timeout-minutes: 5
         working-directory: database
         env:
-          COCKROACH_HOST: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
+          COCKROACH_HOST: ${{ steps.db_nodes.outputs.DB_LB_ENDPOINT }}
         run: |
           bash scripts/local-test.sh
 
@@ -262,75 +205,57 @@ jobs:
       # Backend cluster (started after the migration: it needs the schema)
       # ------------------------------------------------------------------
 
-      # VMs: be-lb, be-node1 ... be-nodeN.
-      # Outputs: BE_LB_IP, BE_NODE_IPS, and the full handle of every VM.
-      - name: Launch backend guests
+      - name: Launch backend load balancer VM
         timeout-minutes: 5
-        id: be_guests
+        id: be_lb
         run: |
           set -Eeuo pipefail
-          bash "$SCRIPTS/multipass-cluster-launch.sh" be \
-            --nodes "$BE_NODE_COUNT" \
-            --memory "$BE_VM_MEMORY" \
+          bash "$SCRIPTS/multipass-launch.sh" be-lb --prefix BE_LB \
+            --cpus 1 --memory "$BE_VM_MEMORY" --disk 6G --timeout 900 \
             >> "$GITHUB_OUTPUT"
 
-      # One loop: each node gets the image tar and the database client
-      # certificates, then runs the container. The backend reaches the
-      # database through the database load balancer.
-      - name: Deploy backend nodes
-        timeout-minutes: 5
-        id: be_deploy
+      # One loop, one node at a time. Each node goes all the way:
+      #   launch VM -> image tar + database client certs -> container healthy
+      #   -> added to the load balancer
+      # The backend reaches the database through the database load balancer.
+      # Outputs: BE_NODE_IPS, BE_LB_ENDPOINT, and the VM handle / deploy
+      # outputs of every node.
+      - name: Add backend nodes, one at a time
+        timeout-minutes: 20
+        id: be_nodes
         env:
-          BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
-          DB_LB_IP: ${{ steps.db_haproxy.outputs.DB_LB_IP }}
+          BE_LB_IP: ${{ steps.be_lb.outputs.BE_LB_IP }}
+          DB_LB_IP: ${{ steps.db_lb.outputs.DB_LB_IP }}
           BE_IMAGE_TAR: ${{ steps.be_image.outputs.BE_IMAGE_TAR }}
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          IFS=, read -ra IPS <<< "$BE_NODE_IPS"
-          if (( ${#IPS[@]} != BE_NODE_COUNT )); then
-            echo "Expected $BE_NODE_COUNT node IPs, got ${#IPS[@]}: $BE_NODE_IPS" >&2
-            exit 1
-          fi
-
+          ips=""
           for i in $(seq 1 "$BE_NODE_COUNT"); do
-            bash "$SCRIPTS/be-node-deploy.sh" \
-              --vm "be-node$i" \
+            echo "::group::Backend node $i of $BE_NODE_COUNT"
+            out=$(bash "$SCRIPTS/be-add-node.sh" "$i" \
+              --known-ips "$ips" \
               --db-host "$DB_LB_IP" \
               --db-port "$DB_SQL_PORT" \
               --image-tar "$BE_IMAGE_TAR" \
               --certs-dir database/certs/user_be \
               --port "$BE_PORT" \
               --health-path "$BE_HEALTH_PATH" \
-              --prefix "be_node${i}_deploy" \
-              >> "$GITHUB_OUTPUT"
+              --memory "$BE_VM_MEMORY")
+            echo "::endgroup::"
+            echo "$out" >> "$GITHUB_OUTPUT"
+            ips="${ips:+$ips,}$(sed -n "s/^BE_NODE${i}_IP=//p" <<<"$out")"
           done
-
-      # Output: BE_LB_ENDPOINT (ip:port), BE_LB_IP, BE_LB_PORT, ...
-      - name: Configure and start backend load balancer
-        timeout-minutes: 5
-        id: be_haproxy
-        env:
-          BE_NODE_IPS: ${{ steps.be_guests.outputs.BE_NODE_IPS }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          IFS=, read -ra IPS <<< "$BE_NODE_IPS"
-
-          bash "$SCRIPTS/haproxy-lb-setup.sh" be-lb \
-            --prefix be_lb \
-            --service-name api \
-            --backend-port "$BE_PORT" \
-            --health-path "$BE_HEALTH_PATH" \
-            "${IPS[@]}" \
-            >> "$GITHUB_OUTPUT"
+          {
+            echo "BE_NODE_IPS=$ips"
+            echo "BE_LB_ENDPOINT=$BE_LB_IP:$BE_PORT"
+          } >> "$GITHUB_OUTPUT"
 
       # Smoke test only; the API test suite comes in a later phase.
       - name: Smoke test backend through its load balancer
         timeout-minutes: 5
         env:
-          BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
+          BE_LB_ENDPOINT: ${{ steps.be_nodes.outputs.BE_LB_ENDPOINT }}
         run: |
           set -Eeuo pipefail
           url="http://$BE_LB_ENDPOINT$BE_HEALTH_PATH"
@@ -344,8 +269,8 @@ jobs:
       - name: schemathesis test for API
         timeout-minutes: 20
         env:
-          DB_LB_ENDPOINT: ${{ steps.db_haproxy.outputs.DB_LB_ENDPOINT }}
-          BE_LB_ENDPOINT: ${{ steps.be_haproxy.outputs.BE_LB_ENDPOINT }}
+          DB_LB_ENDPOINT: ${{ steps.db_nodes.outputs.DB_LB_ENDPOINT }}
+          BE_LB_ENDPOINT: ${{ steps.be_nodes.outputs.BE_LB_ENDPOINT }}
         run: |
           set -Eeuo pipefail
           USER_BE_CERTS="database/certs/user_be"
