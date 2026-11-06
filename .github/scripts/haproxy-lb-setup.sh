@@ -13,6 +13,8 @@
 #   --health-path P     HTTP health check "GET P"   (default: plain TCP check)
 #   --health-port N     port used for the health check (default: the backend port)
 #   --tcp-check         force a plain TCP check (clears --health-path/--health-port)
+#   --skip-install      do not install HAProxy (an earlier run already did);
+#                       the config is still rendered again and HAProxy reloaded
 #   --prefix PFX        KEY prefix for stdout (default: upper-cased VM name)
 #
 # Options may be repeated; the last occurrence wins.
@@ -39,6 +41,7 @@ HEALTH_PORT=""
 HEALTH_PATH=""
 SERVICE=app
 PREFIX=""
+SKIP_INSTALL=0
 BACKENDS=()
 
 while (($#)); do
@@ -50,6 +53,7 @@ while (($#)); do
     --health-port)  opt_val "$@"; HEALTH_PORT=$2;  shift 2 ;;
     --prefix)       opt_val "$@"; PREFIX=$2;       shift 2 ;;
     --tcp-check)    HEALTH_PATH=""; HEALTH_PORT=""; shift ;;
+    --skip-install) SKIP_INSTALL=1; shift ;;
     -h|--help)      usage; exit 0 ;;
     -*)             die "unknown option: $1" ;;
     *)
@@ -102,9 +106,13 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/conf"
 
-log "Installing HAProxy on $LB..."
-mp exec "$LB" -- sudo bash -c \
-  'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y haproxy' >&2
+if ((SKIP_INSTALL)); then
+  log "Skipping HAProxy install on $LB"
+else
+  log "Installing HAProxy on $LB..."
+  mp exec "$LB" -- sudo bash -c \
+    'export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y haproxy' >&2
+fi
 
 log "Rendering config for ${#BACKENDS[@]} backend(s), check: $CHECK"
 render_config > "$tmp/conf/haproxy.cfg"
@@ -123,7 +131,7 @@ mp exec "$LB" -- sudo bash -c '
   set -Eeuo pipefail
   haproxy -c -f /etc/haproxy/haproxy.cfg
   systemctl enable haproxy
-  systemctl restart haproxy
+  systemctl reload-or-restart haproxy
   systemctl is-active --quiet haproxy
 ' >&2
 
