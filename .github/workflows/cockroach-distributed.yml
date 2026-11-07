@@ -90,8 +90,10 @@ jobs:
 
       - name: Create image output directory
         run: |
-          mkdir -p "$(dirname "${{ env.BE_IMAGE_TAR }}")"
-          ls "$(dirname "${{ env.BE_IMAGE_TAR }}")"
+          BE_IMAGE_DIR=$(dirname "${{ env.BE_IMAGE_TAR }}")
+          echo "Creating the directory for BE image at: $BE_IMAGE_DIR"
+          mkdir -p "$BE_IMAGE_DIR"
+          ls "$BE_IMAGE_DIR"
 
       - name: Build backend image to local tar
         uses: docker/bake-action@v2.3.0
