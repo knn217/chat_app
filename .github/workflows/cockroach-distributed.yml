@@ -98,15 +98,13 @@ jobs:
       - name: Build backend image to local tar
         uses: docker/bake-action@v2.3.0
         with:
-          # It will automatically look for docker-compose.backend.yml or docker-compose.yml, 
-          # or you can explicitly point files to your compose file:
           files: docker-compose.backend.yml
-          targets: backend # Replace with your compose service name
+          targets: backend
           push: false
           set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-            *.output=type=tar,dest=${{ env.BE_IMAGE_TAR }}
+            backend.cache-from=type=gha
+            backend.cache-to=type=gha,mode=max
+            backend.output=type=tar,dest=${{ env.BE_IMAGE_TAR }}
 
       - name: Verify tar file exists
         run: |
