@@ -88,14 +88,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Create image output directory
-        run: |
-          BE_IMAGE_DIR=$(dirname "${{ env.BE_IMAGE_TAR }}")
-          echo "Creating the directory for BE image at: $BE_IMAGE_DIR"
-          mkdir -p "$BE_IMAGE_DIR"
-          ls "$BE_IMAGE_DIR"
+      - name: Create BE image output directory
+        run: mkdir -p "$(dirname "${{ env.BE_IMAGE_TAR }}")"
 
-      - name: Build backend image to local tar
+      - name: Build BE image and load to local docker
         uses: docker/bake-action@v2.3.0
         with:
           files: docker-compose.backend.yml
@@ -104,9 +100,13 @@ jobs:
           set: |
             backend.cache-from=type=gha
             backend.cache-to=type=gha,mode=max
-            backend.output=type=tar,dest=${{ env.BE_IMAGE_TAR }}
+            backend.output=type=docker
 
-      - name: Verify tar file exists
+      - name: Export BE image to tarball
+        run: |
+          docker save backend_img -o "${{ env.BE_IMAGE_TAR }}"
+
+      - name: Verify BE tar file exists
         run: |
           echo "Checking directory contents:"
           ls -lh "$(dirname "${{ env.BE_IMAGE_TAR }}")" || true
