@@ -108,6 +108,11 @@ jobs:
             *.cache-to=type=gha,mode=max
             *.output=type=tar,dest=${{ env.BE_IMAGE_TAR }}
 
+      - name: Verify tar file exists
+        run: |
+          ls -lh "$(dirname "${{ env.BE_IMAGE_TAR }}")"
+          file "${{ env.BE_IMAGE_TAR }}"
+
       # Everything for the database that does not depend on VM IPs is prepared
       # up front, so a problem here fails fast, before any VM is launched.
       - name: Generate shared database certificates and deployment package
