@@ -1,6 +1,14 @@
 # Stage 1: Compute a recipe file for caching dependencies
-FROM rust:1.99-slim AS builder
+FROM rust:1.99-slim AS chef
+RUN cargo install cargo-chef
 WORKDIR /backend_builder
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /backend_builder/recipe.json recipe.json
 
 # Install build essentials, OpenSSL headers, and curl (required for utoipa-swagger-ui build script)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN cargo chef cook --profile=release --package=backend --recipe-path=recipe.json
 
 # Build the binary for image
 COPY . .
