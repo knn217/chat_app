@@ -110,7 +110,12 @@ jobs:
 
       - name: Verify tar file exists
         run: |
-          ls -lh "$(dirname "${{ env.BE_IMAGE_TAR }}")"
+          echo "Checking directory contents:"
+          ls -lh "$(dirname "${{ env.BE_IMAGE_TAR }}")" || true
+          if [ ! -f "${{ env.BE_IMAGE_TAR }}" ]; then
+            echo "::error::Backend image tarball not found at ${{ env.BE_IMAGE_TAR }}"
+            exit 1
+          fi
           file "${{ env.BE_IMAGE_TAR }}"
 
       # Everything for the database that does not depend on VM IPs is prepared
