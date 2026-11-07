@@ -89,7 +89,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create image output directory
-        run: mkdir -p "$(dirname "${{ env.BE_IMAGE_TAR }}")"
+        run: |
+          mkdir -p "$(dirname "${{ env.BE_IMAGE_TAR }}")"
+          ls "$(dirname "${{ env.BE_IMAGE_TAR }}")"
 
       - name: Build backend image to local tar
         uses: docker/bake-action@v2.3.0
